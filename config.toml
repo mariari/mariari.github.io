@@ -1,0 +1,16 @@
+baseURL = "http://mariari.github.io"
+languageCode = "en-us"
+title = "Ramblings on Computer Science"
+theme = "accessible-minimalism"
+disableHugoGeneratorInject = true
+enableRobotsTXT = true
+
+[menu]
+  [[menu.main]]
+    name = "Home"
+    url = "/"
+    weight = 1
+  [[menu.main]]
+    name = "Posts"
+    url = "/posts/"
+    weight = 2
