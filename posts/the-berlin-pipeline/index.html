@@ -1,0 +1,1318 @@
+<!doctype html><html lang=en-us xmlns=http://www.w3.org/1999/xhtml><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><link rel=icon href=data:,%89PNG%0D%0A%1A%0A><title>Ramblings on Computer Science | The Berlin Pipeline</title><style type=text/css>body{font-size:150%;font-family:muli,avenir,helvetica neue,helvetica,ubuntu,roboto,noto,segoe ui,arial,sans-serif}</style></head><body><p><a href=#nav-menu>Menu</a></p><h1>The Berlin Pipeline</h1><p>Nov 30, 2022</p><p>The Berlin Pipeline was originally an architecture proposal for a
+compiler project written in the
+<a href=https://en.wikipedia.org/wiki/ML_(programming_language)>ML</a> style.
+Which is to say the compiler is written as a series of passes and
+layers from the frontend language all the way down to the
+backend. With that said, The Berlin Pipeline should be of interest to
+compiler writers regardless of backgrounds and can be applied to any
+compiler that:</p><ol><li>Has complex pipelining</li><li>Can not be self hosted.</li></ol><p>Category <code>1.</code> tends to occur with any language that has a core that
+can not host itself. Therefore languages like
+<a href=https://en.wikipedia.org/wiki/Lisp_(programming_language)>Lisp</a> and
+<a href=https://en.wikipedia.org/wiki/Smalltalk>Smalltalk</a> do not have this
+issue, however languages in the
+<a href=https://en.wikipedia.org/wiki/ML_(programming_language)>ML</a> family
+or the <a href=https://en.wikipedia.org/wiki/ALGOL>Algol</a> family do have
+these issues.</p><p>Category <code>2.</code> tends to occur with domain specific languages. For
+example the <a href=https://github.com/anoma/juvix-circuits>Alucard</a>
+programming language that I worked on targets a <code>ZKP</code> language known
+as <a href=https://github.com/anoma/vamp-ir>vamp-ir</a>. Since <code>ZKP</code> languages
+typically are not powerful enough to create very general abstractions,
+the core of <code>Alucard</code> could not extend itself, thus it relies on a
+pipeline to get frontend code down to <code>vamp-ir</code>.</p><p>The Berlin Pipeline is a flexible architecture proposal, and has a
+generic processing model that is ripe for further extension. So, the
+base model can be tweaked to one&rsquo;s use case. In developing the
+original <code>ML</code> compiler, some extensions were implemented, like
+implementing passes that can hook <code>before</code>, <code>after</code>, and <code>around</code>
+every pass (This feature was heavily inspired from
+<a href=https://en.wikipedia.org/wiki/Common_Lisp_Object_System>CLOS</a>).</p><p>The drawback of this generality is that the architecture takes a bit
+of development time, so in more simple compilers it may be best to use
+some of the ideas proposed here for inspiration rather than taking the
+architecture wholesale.</p><p>The rest of this document is the original proposal without edit,
+however there are a few key sections changed:</p><ol><li>The <code>Examples</code> section has new examples added that show the use of
+the Berlin Pipeline in action in the real compiler it was written
+for.</li><li>The <code>Why Behind S-expressions</code> section has been added to give
+motivation on why processing should be on such a generic structure.<ul><li>This section is a long analysis on the benefits of having a
+standardized and flexible format to work with inside a compiler.</li><li>This section can be read on its own, and the lesson provided by
+it can be taken to any compiler project.</li></ul></li></ol><p>With the preamble out of the way, we present the original Berlin
+Pipeline proposal!</p><h2 id=the-berlin-pipeline-proposal>The Berlin Pipeline Proposal</h2><p>In this document we outline the Berlin Pipeline. The document is
+broken up into three core chunks along with a miscellaneous section
+that outlines helper structures which are integral to the smooth
+operation of the pipeline.</p><p>These four sections are</p><ol><li>The Berlin Pipeline Step</li><li>The Berlin Pipeline Proper</li><li>The Berlin Pipeline Automatisierung</li><li>The Berlin Pipeline Extensions</li></ol><p>The fourth section covers extensions that have made it in the codebase
+that may alter the shape of the first three sections that are written
+about.</p><p>With the Following sections to prop up the understanding of the Model</p><ol start=0><li>The Why Behind S-expressions.</li><li>Motivation</li><li>Das Modell</li><li>Computational Meta Data A Plan</li><li>Cyclic Lists and Their Uses</li><li>A Note about Notation</li><li>Examples</li></ol><p>Examples will show the API come together with a few examples taken
+from a compiler which used the Berlin Pipeline. This section can be
+seen after the whole model is shown.</p><p>The full code that backs the proposal can be found
+<a href=https://github.com/mariari/Misc-ML-Scripts/blob/master/OCaml/berlin-pipeline.mli>here</a>.</p><h2 id=the-why-behind-s-expressions>The Why Behind S-expressions.</h2><p><a href=https://en.wikipedia.org/wiki/S-expression>S-expressions</a> were a
+controversial choice, however something akin to them are a necessity
+for achieving the Berlin Pipeline.</p><p>The key insight is that in a statically typed programming language one
+would want:</p><ol><li>The ability to stop anywhere in the pipeline and inspect the state generically</li><li>The ability to share the language context/environment between code
+that is already compiled and the newly compiling code.</li></ol><p>Point <code>2.</code> is a nice feature to have, and is required if one is
+writing an
+<a href=https://en.wikipedia.org/wiki/Dynamic_compilation#Incremental_compilation>incremental-compiler</a>,
+and point <code>1.</code> is needed to have a nice generic API like the Berlin
+Pipeline.</p><p>What this means is that for statically typed language, you want to run
+your passes and store them in the context/environment in some
+<code>serialized</code> dynamic format. The format we have chosen for this is the
+<a href=https://en.wikipedia.org/wiki/S-expression>S-expression</a>.</p><p>For dynamically typed languages this is not needed, as the context can
+hold any type of structure, and passes can be run with no issue on
+different formats.</p><p>However, I would argue that even for dynamically typed languages, the
+concept of a serializable structure to do work on is a great benefit
+and would severely reduce the amount of boilerplate written.</p><p>To give a feeling of this, let us imagine we are trying to move our
+AST into ANF form. Instead of trying to match on every single kind of
+object/structure that makes up our AST, we can instead turn the more
+generic structures into the <code>serialized</code> format and run our
+transformation there before deserializing it back.</p><p>An example of this can be seen in my very own <a href=https://github.com/anoma/juvix-circuits/blob/1769761e77cbce8c1f84e89554a415a5bbac7066/src/pass/anf.lisp#L101>AST transformation for Alucard</a>.</p><p>If the structure didn&rsquo;t have this, then the same boilerplate would
+have to be implemented for every single variant listed in the <code>or</code>
+listed there, with slightly different calling semantics that refer to
+their particular field accessors and constructors.</p><p>Since the serialization format unifies the structure of the entire
+compiler, a team or person writing tools on one part of the codebase,
+can directly be used by another team/person working on the opposite
+end of the codebase immediately. No issue of a different AST format,
+forcing the bulk of the tooling to be rewritten is had.</p><p>I would go on to say this encourages:</p><ol><li>Compiler tooling in the compiler to be made. Tooling is now high
+leverage and affects the entire codebase.<ul><li>This is very reminiscent to what more iterative compilers like
+<a href=https://en.wikipedia.org/wiki/Squeak>Squeeks</a> do, where since
+they are forced to use their language, it becomes high leverage
+<a href=https://smalltalkzoo.thechm.org/papers/Back%20to%20the%20Future.PDF>to extend the environment as they write</a></li><li>Further it falls inline with the Alan Perlis quote &ldquo;It is better
+to have 100 functions operate on one data structure than to have
+10 functions operate on 10 data structures.&rdquo;</li></ul></li></ol><ul><li>Tooling includes concepts like:<ol><li>Code Inspectors</li><li>AST traversal tools (more on this later)</li><li>Code Debugging Tooling</li><li>Tracing Tooling</li><li>Extensible Formatting tooling</li></ol></li></ul><ol start=2><li>Safer, flexible, and more resilient codebase</li></ol><p>Point <code>2.</code> needs further clarification. To demonstrate this point I
+will be using the <code>Haskell</code> programming language, and discussing
+various ways of writing AST traversal functions.</p><ul><li><p>There are only a couple of ways we can do this in Haskell</p><ol><li>Write out concrete data structure between each pass, and
+write a small pass between each structure</li><li>Use <a href=https://okmij.org/ftp/tagless-final/index.html><code>Tagless Final</code></a>
+to make changing a big AST less cumbersome</li><li>Use <code>Trees that Grow</code> to simulate small changes within an AST</li><li>Give up on small changes, and bundle together <code>n</code> changes in
+one pass.</li><li>Use Generics to automate the structural changes.</li><li>Use S-expressions to change the structures</li></ol></li><li><p>The issue with <code>1)</code> is that it incurs a code cost of the length of
+the structure you are working over. This means that for any
+unchanged part of the syntax, we must map it to itself recursing
+down manually. Further this means that any tool we made for this
+form of the syntax, it can not be used later, meaning that any
+safety tooling we&rsquo;ve made now has to be remade or simply forgotten
+past this point.</p></li><li><p>The issue with <code>2)</code> is that it becomes <code>O(n)</code> to do any
+transformation which require matching on arguments (I believe
+<a href=https://okmij.org/ftp/tagless-final/course/Boehm-Berarducci.html#tagless-final>this</a>
+link by Oleg outlines the issue). Along with complications of
+forming the <code>observation</code> type in Haskell, make it a less
+compelling case than other options. Many such inspection tooling
+would benefit from a more concrete syntax, which can be done in
+<code>tagless final</code>, however it is more complicated and comes at a
+cost.</p></li><li><p>The issue with <code>3)</code> is that it only automates forming the
+data-type itself, not any pass. Thus to make a transformation, it
+takes as much code as <code>1)</code>. With <code>5)</code> the situation may improve
+but we will discuss it when we discuss <code>5)</code>.</p></li><li><p>The issue with <code>4)</code> is that we now have to bundle <code>n</code> individual
+passes into one macro pass. This greatly simplifies the issues
+with the other passes, as we have very fixed layers of data types
+that we can scrutinize, however this leaves any proving or
+reasoning about the passes themselves much harder. This also like
+the previous ways of processing removes any kind of sharing that
+is possible between the passes.</p></li><li><p>The issue with <code>5)</code> is that we are leveraging on a system that
+splits information evenly at the type level and the term level.
+We can demonstrate this phenomenon by using <code>to</code> and <code>from</code>
+directly to see the representation this would take even for some
+very basic terms.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#75715e>-- Getting the term from a basic structure</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>λ</span><span style=color:#f92672>&gt;</span> <span style=color:#66d9ef>Library</span><span style=color:#f92672>.</span>from (<span style=color:#66d9ef>Other</span> <span style=color:#ae81ff>3</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>M1</span> {unM1 <span style=color:#f92672>=</span> <span style=color:#66d9ef>L1</span> (<span style=color:#66d9ef>L1</span> (<span style=color:#66d9ef>L1</span> (<span style=color:#66d9ef>M1</span> {unM1 <span style=color:#f92672>=</span> <span style=color:#66d9ef>M1</span> {unM1 <span style=color:#f92672>=</span> <span style=color:#66d9ef>K1</span> {unK1 <span style=color:#f92672>=</span> <span style=color:#ae81ff>3</span>}}})))}
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- Checking the type information which allows us to get back to a</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- concrete type</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>λ</span><span style=color:#f92672>&gt;</span> <span style=color:#66d9ef>:</span>t <span style=color:#66d9ef>Library</span><span style=color:#f92672>.</span>from (<span style=color:#66d9ef>Other</span> <span style=color:#ae81ff>3</span>)
+</span></span><span style=display:flex><span><span style=color:#66d9ef>Library</span><span style=color:#f92672>.</span>from (<span style=color:#66d9ef>Other</span> <span style=color:#ae81ff>3</span>)
+</span></span><span style=display:flex><span>  <span style=color:#f92672>::</span> <span style=color:#66d9ef>Num</span> a <span style=color:#f92672>=&gt;</span>
+</span></span><span style=display:flex><span>     <span style=color:#66d9ef>D1</span>
+</span></span><span style=display:flex><span>       (<span style=color:#66d9ef>&#39;MetaData</span> <span style=color:#e6db74>&#34;BinderPlus&#34;</span> <span style=color:#e6db74>&#34;Contextify.Binders&#34;</span> <span style=color:#e6db74>&#34;main&#34;</span> <span style=color:#66d9ef>&#39;False</span>)
+</span></span><span style=display:flex><span>       (((<span style=color:#66d9ef>C1</span>
+</span></span><span style=display:flex><span>         <span style=color:#960050;background-color:#1e0010>…</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>λ</span><span style=color:#f92672>&gt;</span> <span style=color:#66d9ef>:</span>t <span style=color:#66d9ef>Library</span><span style=color:#f92672>.</span>to
+</span></span><span style=display:flex><span><span style=color:#66d9ef>Library</span><span style=color:#f92672>.</span>to <span style=color:#f92672>::</span> <span style=color:#66d9ef>Generic</span> a <span style=color:#f92672>=&gt;</span> <span style=color:#66d9ef>Rep</span> a x <span style=color:#f92672>-&gt;</span> a
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>λ</span><span style=color:#f92672>&gt;</span> <span style=color:#66d9ef>:</span>t <span style=color:#66d9ef>Library</span><span style=color:#f92672>.</span>from
+</span></span><span style=display:flex><span><span style=color:#66d9ef>Library</span><span style=color:#f92672>.</span>from <span style=color:#f92672>::</span> <span style=color:#66d9ef>Generic</span> a <span style=color:#f92672>=&gt;</span> a <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Rep</span> a x
+</span></span></code></pre></div><p>Here we can see that for the constructor <code>Other</code>, we have 3 <code>L1</code>
+structures and two <code>M1</code> structures wee have to get rid of before
+we can get to the data. Worse if we look at the type level, we can
+see that the entire ADT is reserved through this. So if we wanted
+to create a pass that got rid of the boilerplate, translating from
+one ML data type to another, we can not just call <code>to</code> and <code>from</code>
+as the types are incompatible, even if we changed the subset of
+cases we wish to change. Thus we'd have to reconstruct the <code>M1's</code>
+and <code>L1's</code> to get back a proper typed representation. This means
+that we have to compute on the <code>Rep</code> representation of the type
+during the pass, calling <code>to</code> once all cases have been run,
+effectively ending up with the same amount of boilerplate at 1.</p><p>One approach that might work is combining this with <code>3)</code> to
+properly generate these transformations. However this would take
+more template Haskell to properly experiment with.</p></li><li><p>The issue with <code>6.</code> is that we&rsquo;ve expressed the passes as a bona
+fide macro-expansion, therefore proving that they can indeed be
+done within a language. Thus instead of working on getting the
+language to a state where it can support such expressions and
+centralizing work upon this effort, we put extra complexity on
+getting a large frontend language to meetup with the small
+core. Thus, infrastructure becomes an issue as we need proper
+tools to properly conduct these transformations.</p></li></ul><p>So it may seem like the situation is fairly rough. With approaches
+<code>1.</code> and <code>4.</code> giving concrete definitions of the AST that over
+constrain it, and approaches <code>2.</code> and <code>3.</code> having their own faults in
+the extension mechanism, leaving them too constrained or complex in
+practice. Approaches <code>5.</code> and <code>6.</code> completely unconstrain the
+representation, removing any sense of type safety. However the main
+benefit of <code>6.</code> in particular is that we can write generic tools
+easily over the structure. So what if we can selectively harden the
+<code>AST</code> for the forms that we care about and run our passes on those?</p><p>This would mean that we can implement generic tooling for traversing
+<code>S-expressions</code>, allowing us to pass a function <code>f</code> that gets run on
+every deserailzied form. For context free passes, we could run this
+kind of traversal on individual parts of the AST safely and turn it
+into a different kind of AST node before serializing it back.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#a6e22e>f</span> <span style=color:#66d9ef>:</span> <span style=color:#66d9ef>Cond</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>If</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condToIf</span> <span style=color:#66d9ef>:</span> <span style=color:#66d9ef>Sexp</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Sexp</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condToIf</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>runOnDeserialize <span style=color:#f92672>@</span><span style=color:#66d9ef>Cond</span> f
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>data</span> <span style=color:#66d9ef>Cond</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>Cond</span> [(<span style=color:#66d9ef>Sexp</span>, <span style=color:#66d9ef>Sexp</span>)] <span style=color:#66d9ef>deriving</span> <span style=color:#66d9ef>Serialize</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>data</span> <span style=color:#66d9ef>If</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>If</span> <span style=color:#66d9ef>Sexp</span> <span style=color:#66d9ef>Sexp</span> <span style=color:#66d9ef>Sexp</span> <span style=color:#66d9ef>deriving</span> <span style=color:#66d9ef>Serialize</span>
+</span></span></code></pre></div><p>And for context sensitive passes, we can implement a deserializer that
+talks about all forms of binding in the system. Meaning that we can
+implement generic logic that respects binders throughout the
+compiler. The <code>Infix</code> example in the <code>Examples</code> section has code that
+does precisely this.</p><p>Further, in languages with good interface support like smalltalk (any
+OO language would do) this can be abused for easily declaring that
+certain types (or keywords that deserialize to a type) map to a binder
+and that we can use our generic logic to handle it.</p><p>We can see that point <code>2.</code> expands into giving us:</p><ol><li>Αn AST that can be as constrained as we need it to be</li><li>Tooling to enforce constraints throughout any part of the compiler</li><li>Tooling that leaves the AST unconstrained enough to handle radical
+change</li><li>Allowing independent AST changes to be re-organized into more
+affect AST traversals.</li></ol><p>All of these benefits are not unique to <code>s-expressions</code>, but rather to
+any conceptual model that allows easy serialization, deserialization,
+partial deserialization, and traversing the serialized format.</p><p>Overall these properties are highly desirable when trying to make any
+compiler. Languages that can have cores which can themselves do this
+implicitly, and their power is required for achieving our motivations.</p><h2 id=motivation>Motivation</h2><p>One may ask why we should even begin the Berlin Pipeline, afterall we
+currently can get <code>LLVM</code>, <code>Michelson</code>, and <code>Plonk</code> a term to
+compile. However what this does not take into account is the following
+properties:</p><ol><li>Having the ability to stop between any step to see the results of a
+certain phase</li><li>Proper feedback to the compiler through the steps<ul><li>The pass simply returns an either, it does not have the capacity
+to return the types</li></ul></li><li>A consistent environment to thread through all passes</li><li>A consistent environment to compile not just a term, but a list of
+definitions</li><li>A consistent environment between compilation passes.</li></ol><p>Out of these issues, only issue <code>2.</code> is solvable with the current
+architecture.</p><p>This is becuase the pipeline has the following structure:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#66d9ef>type</span> <span style=color:#66d9ef>Pipeline</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>Feedback</span><span style=color:#f92672>.</span><span style=color:#66d9ef>FeedbackT</span> <span style=color:#66d9ef>[]</span> [<span style=color:#66d9ef>Char</span>] <span style=color:#66d9ef>IO</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>class</span> <span style=color:#66d9ef>HasBackend</span> b <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>Ty</span> b <span style=color:#f92672>=</span> ty <span style=color:#f92672>|</span> ty <span style=color:#f92672>-&gt;</span> b
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>Val</span> b <span style=color:#f92672>=</span> val <span style=color:#f92672>|</span> val <span style=color:#f92672>-&gt;</span> b
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>Err</span> b <span style=color:#f92672>=</span> e <span style=color:#f92672>|</span> e <span style=color:#f92672>-&gt;</span> b
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  stdlibs <span style=color:#f92672>::</span> b <span style=color:#f92672>-&gt;</span> [<span style=color:#66d9ef>FilePath</span>]
+</span></span><span style=display:flex><span>  stdlibs <span style=color:#66d9ef>_</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>[]</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>-- | Parse source code passing a set of libraries explicitly to have them in scope</span>
+</span></span><span style=display:flex><span>  toML&#39; <span style=color:#f92672>::</span> [<span style=color:#66d9ef>FilePath</span>] <span style=color:#f92672>-&gt;</span> b <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Text</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Pipeline</span> [(<span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>, [<span style=color:#66d9ef>Types</span><span style=color:#f92672>.</span><span style=color:#66d9ef>TopLevel</span>])]
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  toSexp <span style=color:#f92672>::</span> b <span style=color:#f92672>-&gt;</span> [(<span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>, [<span style=color:#66d9ef>Types</span><span style=color:#f92672>.</span><span style=color:#66d9ef>TopLevel</span>])] <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Pipeline</span> (<span style=color:#66d9ef>Context</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  toHR <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>    (<span style=color:#66d9ef>Show</span> (<span style=color:#66d9ef>Ty</span> b), <span style=color:#66d9ef>Show</span> (<span style=color:#66d9ef>Val</span> b)) <span style=color:#f92672>=&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Param</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Parameterisation</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Context</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Pipeline</span> (<span style=color:#66d9ef>Core</span><span style=color:#f92672>.</span><span style=color:#66d9ef>RawGlobals</span> <span style=color:#66d9ef>HR</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b))
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  toIR <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Core</span><span style=color:#f92672>.</span><span style=color:#66d9ef>RawGlobals</span> <span style=color:#66d9ef>HR</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Pipeline</span> (<span style=color:#66d9ef>Core</span><span style=color:#f92672>.</span><span style=color:#66d9ef>PatternMap</span> <span style=color:#66d9ef>Core</span><span style=color:#f92672>.</span><span style=color:#66d9ef>GlobalName</span>, <span style=color:#66d9ef>Core</span><span style=color:#f92672>.</span><span style=color:#66d9ef>RawGlobals</span> <span style=color:#66d9ef>IR</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b))
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  toErased <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Constraints</span> b <span style=color:#f92672>=&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Param</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Parameterisation</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    (<span style=color:#66d9ef>Core</span><span style=color:#f92672>.</span><span style=color:#66d9ef>PatternMap</span> <span style=color:#66d9ef>Core</span><span style=color:#f92672>.</span><span style=color:#66d9ef>GlobalName</span>, <span style=color:#66d9ef>Core</span><span style=color:#f92672>.</span><span style=color:#66d9ef>RawGlobals</span> <span style=color:#66d9ef>IR</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b)) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Pipeline</span> (<span style=color:#66d9ef>ErasedAnn</span><span style=color:#f92672>.</span><span style=color:#66d9ef>AnnTermT</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b))
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  typecheck <span style=color:#f92672>::</span> <span style=color:#66d9ef>Context</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Pipeline</span> (<span style=color:#66d9ef>ErasedAnn</span><span style=color:#f92672>.</span><span style=color:#66d9ef>AnnTermT</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b))
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  compile <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>FilePath</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>ErasedAnn</span><span style=color:#f92672>.</span><span style=color:#66d9ef>AnnTermT</span> (<span style=color:#66d9ef>Ty</span> b) (<span style=color:#66d9ef>Val</span> b) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Pipeline</span> ()
+</span></span></code></pre></div><p>Starting form <code>toSexp</code> we get the <code>Pipeline</code> type which is just an
+alias for Feedback. Thus no environment could be shared. However, even
+if we extend the <code>Pipeline</code> type with Context Information, which
+context do we share? All the passes up to <code>toHR</code> are compatabile with
+the <code>Context.T</code> type, however at that point core uses its own hash
+table structure. Thus to properly fix this situation we need a
+consistent type to thread between the backends.</p><p>Further we can see with this structure, that the details of each pass
+are not expressed. in fact <code>toSexp</code> hides over 7 passes that we have
+no way of stopping between unless we reconstruct the pipeline. Hence,
+the <code>Easy</code> module explicitly repeats this code. Thus we need some kind
+of structure that allows us to talk about passes and sub-passes.</p><p>The Berlin Pipeline seeks to unify both the type of a step and build
+up the type of the pipeline itself. Through this structure we can get
+all 5 of the missing properties and have a principled way of talking
+about what a pass is. This unification also allows tools to be made
+around a pass allowing easy creation of a new pass and the placement
+in the pipeline.</p><h2 id=das-modell>Das Modell</h2><p>The model of the new pipeline is laid out in the following way:</p><ol><li>There exists the Berlin Step. This notion will be carried out in
+the <code>Pipeline.Step</code> module and <code>Pipeline.Step.t</code> will serve as the
+type any compiler step inhabits.</li><li>The Berlin Pipeline Proper refers to the <code>Pipeline.Environment</code>
+module, with the <code>Pipeline.Environment.t</code> being the constructed
+compiler pipeline itself.</li><li>The Berlin Automatisierung concept refers to the
+<code>Pipeline.Automation</code> module which has functions to make inhabiting
+<code>Pipeline.Step</code> easier.</li></ol><p>In this model <code>Pipeline.Environment</code> will give the pipline organizer
+the tools to clearly lay out a straightforward Pipeline. It will also
+give the caller of the pipeline the tools needed to introspect, end
+the pipleine early etc.</p><p>The Pipeline pass writer will utilize the <code>Pipeline.Automation</code> module
+to create passes for the pipeline, inhabiting <code>Pipeline.Step.t</code> and
+finally naming the type giving the pipeline organizer the
+<code>Pipeline.Step.named</code> type.</p><h2 id=computational-meta-data-a-plan>Computational Meta Data: a Plan</h2><p>The current pipeline already has a notion of Meta information
+through the use of the <code>Feedback</code> monad. However, the current
+<code>Feedback</code> monad conflates Feedback and the result of computation
+along with not being easily modifiable to add extra meta information.</p><p>Thus we extend and break apart the <code>Feedback</code> monad as such.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Meta</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span> <span style=color:#f92672>{</span> feedback <span style=color:#f92672>:</span> Feedback.t<span style=color:#f92672>;</span> trace <span style=color:#f92672>:</span> Trace.t <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>ComputationResult</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|</span> <span style=color:#a6e22e>Success</span> <span style=color:#66d9ef>of</span> <span style=color:#f92672>{</span>meta <span style=color:#f92672>:</span> Meta.t<span style=color:#f92672>;</span> result           <span style=color:#f92672>:</span> <span style=color:#66d9ef>&#39;</span>a<span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|</span> <span style=color:#a6e22e>Failure</span> <span style=color:#66d9ef>of</span> <span style=color:#f92672>{</span>meta <span style=color:#f92672>:</span> Meta.t<span style=color:#f92672>;</span> partial_feedback <span style=color:#f92672>:</span> <span style=color:#66d9ef>&#39;</span>a option<span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><p>The <code>Meta.t</code> type is filled with the meta information from
+computation. Namely <code>Feedback.t</code> and <code>Trace.t</code>. The <code>Feedback.t</code> is
+the actual feedback part of the <code>Feedback</code> monad, and the <code>Trace.t</code> is
+any traces we could have gotten from a piece of computation. The
+<code>Meta.t</code> type could be extended with further information if further
+information should be captured.</p><p>Further we have the new concept of <code>ComputationResult.t</code> stemming from
+the <code>Failure</code> and <code>Success</code> case of the old <code>Feedback</code> monad. However
+we have a twist in that if we fail computation, we may get a partial
+result.</p><h2 id=cyclic-lists-and-their-uses>Cyclic Lists and Their Uses</h2><p>Another import structure in the Berlin Pipeline is concept of the
+circular list</p><p>we give this type stub to represent the idea</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#75715e>(** A Recursive list represents the concept of a list with a chance to nest
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * This allows us to get a tree like structure,
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * where A pipeline step can contain more steps
+</span></span></span><span style=display:flex><span><span style=color:#75715e> *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>RecursiveList</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a t
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>(** A circular list represents the idea of steps that can be recursive
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * on each other
+</span></span></span><span style=display:flex><span><span style=color:#75715e> *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>CircularList</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(* TODO : add a recursion function to the recursive bit, that tells
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * it how it&#39;s recursive. perhaps it uses a predicate function
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * on the &#39;a type to determine what function to go to next.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a recursive_schema <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|</span> <span style=color:#a6e22e>Recursive</span>    <span style=color:#66d9ef>of</span> <span style=color:#66d9ef>&#39;</span>a <span style=color:#66d9ef>list</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|</span> <span style=color:#a6e22e>NonRecursive</span> <span style=color:#66d9ef>of</span> <span style=color:#66d9ef>&#39;</span>a
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>&#39;</span>a recursive_schema RecursiveList.t
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><p>The <code>CircularList.t</code> is broken down into two parts. The first is a
+<code>RecursiveList.t</code> which represents a list which can recurse. This is
+very similar to the <code>Sexp.t</code> concept except instead of holding
+s-expressions it instead holds arbitrary data.</p><p>Using the recursive list, we are able to construct a circular list
+which has the notion of cycles. The cycle behavior is determined by
+the <code>recursive_schema</code> type which states how the contents are
+recursive on each other. The <code>recursive_schema</code> type should be refined
+in future specification.</p><h2 id=a-note-about-notation>A Note about Notation</h2><p>In this proposal we will be using OCaml code for signatures. OCaml as
+opposed to Haskell was chosen as it has a notion of modules in
+language so the specification can be more straightforwardly laid out.</p><p>This does mean that for many examples we will have <code>Sexp.t list</code>
+instead of <code>List.t Sexp.t</code> or even <code>[Sexp.t]</code>.</p><p>Further when we convert the OCaml functions to Haskell, we will turn
+<code>snake_case</code> into <code>camelCase</code>.</p><p>Since OCaml lacks notions of effects, modules may be given that
+represent the Haskell effects and Haskell may be given to supplement
+where the OCaml may be confusing.</p><h2 id=the-berlin-pipeline-step>The Berlin Pipeline Step</h2><h3 id=purpose-and-specification>Purpose and Specification</h3><p>The Step Module serves as the base interface for any compiler
+step. The module is quite minimal, with only a few types along with a
+small set of operations.</p><p>This main type of the module, <code>t</code>, is simply a function type that
+takes a structure type that has more than it needs to do any pass
+called <code>computational_input</code> and gives back the result of the
+computation plus <code>Meta</code>-data.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span>  <span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Step</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>...</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span> computational_input <span style=color:#f92672>-&gt;</span> working_environment ComputationResult.t
+</span></span><span style=display:flex><span>    <span style=color:#f92672>...</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><p>We say that the pass takes more than it needs because not only is
+<code>computational_input</code> composed of the <code>context</code> and the
+<code>current_expression</code> we are trying to compile against:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#75715e>(** [env_or_sexp] expresses data that may be already added to the environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * or are still in a base sexp form that requires no lookup
+</span></span></span><span style=display:flex><span><span style=color:#75715e> *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> env_or_sexp <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#a6e22e>InEnv</span> <span style=color:#66d9ef>of</span> NameSymbol.t
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#a6e22e>Sexp</span>  <span style=color:#66d9ef>of</span> Sexp.t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> computational_input <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>   language_data    <span style=color:#f92672>:</span> working_environment<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>   <span style=color:#f92672>...</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> working_environment <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>  current_expression <span style=color:#f92672>:</span> env_or_sexp <span style=color:#66d9ef>list</span><span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  context            <span style=color:#f92672>:</span> Sexp.t Context.t
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span></code></pre></div><p>but also a surrounding environment, which contains information that
+should be put in the passes working environment.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span>  <span style=color:#66d9ef>type</span> computational_input <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>      language_data    <span style=color:#f92672>:</span> working_environment<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>      surrounding_data <span style=color:#f92672>:</span> surrounding_environment<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> surrounding_environment <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>     current_step_name <span style=color:#f92672>:</span> NameSymbol.t option<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>     meta_information  <span style=color:#f92672>:</span> Meta.t
+</span></span><span style=display:flex><span>   <span style=color:#f92672>}</span>
+</span></span></code></pre></div><p>This <code>surrounding_environment</code> is composed of <code>Meta</code> information that
+is discussed in the [#Computational Meta Data section], along with the
+name of the <code>current_step</code>. The usefulness of the name will be
+discussed in a later section, but this environment should be able to
+grow without effecting passes which don&rsquo;t touch the extra information.</p><p>The <code>Step</code> Module also has a notion of a <code>named</code> pass</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span>   <span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Step</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span> computational_input <span style=color:#f92672>-&gt;</span> working_environment ComputationResult.t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>type</span> named <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>        name <span style=color:#f92672>:</span> NameSymbol.t<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>        func <span style=color:#f92672>:</span> t
+</span></span><span style=display:flex><span>      <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> name_pass <span style=color:#f92672>:</span> t <span style=color:#f92672>-&gt;</span> NameSymbol.t <span style=color:#f92672>-&gt;</span> named
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><p>The <code>named</code> type simply allows us to attach a name to any given
+Pipeline Step function. This will serve as the type that
+<code>Pipeline.Environment.register_step</code> will deal with. This type should
+be exported opaquely.</p><p>Lastly, the <code>name_pass</code> function is a public constructor of this
+type.</p><h3 id=rational>Rational</h3><p>Overly non constraining types like the input type to <code>Step.t</code> should
+be met with criticism, however in the case of the <code>Step</code> module it is
+necessary to avoid the situation of trying to enforce the
+<code>Pipeline.Environment</code>&rsquo;s effect type upon the passes.</p><p>Since this is a needed separation, the <code>Step</code> module should not be
+programmed against directly, but rather through the
+<code>Pipeline.Automation</code> module that will be able to make a pass work
+over a single <code>env_or_sexp</code> and a <code>Context.t Sexp.t</code> along with the
+pass&rsquo;s custom environment.</p><h2 id=the-berlin-pipeline-proper>The Berlin Pipeline Proper</h2><p>Now that we have the <code>Pipeline.Step</code> properly specified for the
+passes, we can get to the infrastructure this allows the creation of.</p><h3 id=specification>Specification</h3><h4 id=reiteration>Reiteration</h4><p>First before we get to the <code>Environemnt</code> in which the majority of the
+compiler pipeline lives, we must first take a closer look at the
+<code>surrounding_environment</code> the pass gets.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span>  <span style=color:#75715e>(** [surrounding_environment] serves as the minimum surrounding information
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * in the environment of the Pipeline Steps.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> surrounding_environment <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(* This will be taken as a read value *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** The [current_step_name] represents the current running step name *)</span>
+</span></span><span style=display:flex><span>    current_step_name <span style=color:#f92672>:</span> NameSymbol.t option<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>    meta_information  <span style=color:#f92672>:</span> Meta.t
+</span></span><span style=display:flex><span>  <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(** [computational_input] is the actual data passed into the [Step.t] type.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * The [language_data] field serves as the direct data that the direct data
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * a pass wishes to take, while [surrounding_data] serves as extra environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * constraints that one wants to include.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> computational_input <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>    language_data    <span style=color:#f92672>:</span> working_environment<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>    surrounding_data <span style=color:#f92672>:</span> surrounding_environment<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>}</span>
+</span></span></code></pre></div><p>We can see the input type of the pass along with the
+<code>surrounding_environment</code> it caries. For this proposal the
+<code>surrounding_environment</code>code is quite simple, with having
+<code>meta_information</code> which contains the <code>Trace.t</code> and <code>Feedback.t</code>
+inside of it. This inclusion just lets Trace and Feedback information
+be threaded through the passes, as the output type directly has new
+versions of these values. It also has the <code>current_step_name</code>, which
+reflects the current name of the pass running. We will see some
+application of this in the ##Automation Section.</p><p>The important part of this <code>surrounding_environment</code> is that through
+the output type of <code>Pipeline.Step.t</code>, we can have enough data to fill
+the dynamic parts of the <code>Pipeline.Environment</code> itself.</p><h4 id=pipeline-environment>Pipeline Environment</h4><p>The Pipeline Type is defined as follows</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Environment</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [information] serves as the public facing data to the environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * that passes can access
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    information <span style=color:#f92672>:</span> computational_input<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(* All other information is made to be exclusive with the Pipeline as
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * a whole that the Steps do not bother with.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * This consists of information like how to deal with Traces between passes
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * to the entire pass infrastructure itself.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [registered_pipeline] is the pipeline itself.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * It features all the steps named and registered with the system *)</span>
+</span></span><span style=display:flex><span>    registered_pipeline <span style=color:#f92672>:</span> Step.named CircularList.t<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    stopping_step <span style=color:#f92672>:</span> NameSymbol.t option
+</span></span><span style=display:flex><span>  <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>...</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><p>It contains a few pieces of information.</p><p>The first piece is the <code>information</code> which contains the same type that
+<code>Pipeline.Step.t</code> takes.</p><p>This is considered the &ldquo;Dynamic&rdquo; data of the pass and serves a few
+purposes:</p><ol><li>It contains enough information to support directly calling any
+pass.<ul><li>Combining this with the output of the pass we can, with a little
+glue, directly construct a new <code>computation_input</code>.</li></ul></li><li>It alleviates the Passes of having to use any capability regarding
+<code>Environment.t</code> directly, by feeding it directly as input.<ul><li>This will, through <code>Automation</code> become part of the running
+environment of the pass directly, but we avoid the issue of the
+passes needing to use anything in <code>Environment.t</code> that would
+stop it being ran in it&rsquo;s own environment. This is Crucial as we
+can&rsquo;t run partial effects with Capabilities.</li></ul></li><li>It clearly separates the concerns of the Pass, and the Concerns of
+the Pipeline itself.</li></ol><p>The next few pieces of data relate to the pipeline itself and will be
+constructed fully from functions that make up the pipeline or wish to
+manipulate the execution of the pipeline.</p><p>The first piece of data in this list, is the <code>registered_pipeline</code>
+which is what records the passes.</p><p>The type is a <code>CircularList.t</code> over the <code>Step.named</code> structure we
+analyzed previously. The <code>CircularList.t</code> type was chosen because the
+recursive nature gives us a few advantages over a normal List of
+<code>Step.named</code>:</p><ol><li>We get the same behavior as <code>Testy</code> with their <code>T.TestCase</code><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#a6e22e>testGroup</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>TestName</span> <span style=color:#f92672>-&gt;</span> [<span style=color:#66d9ef>TestTree</span>] <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>TestTree</span>
+</span></span></code></pre></div></li><li>If we wish to support mutually recursive passes, then having the
+ability to explicitly state how these passes are circular is
+important.</li></ol><p>We will state more on how <code>registered_pipeline</code> works when we get to
+the API function portion.</p><p>Lastly for now, we will also have the value <code>stopping_step</code>, this
+simply states at which step we should stop running the compiler and
+return any working data that is left.</p><p>Although we only include two fields exclusive to the pipeline
+environment, the design is in such a way that more fields and
+behaviors should be easily added without much hassle.</p><ul><li>An example of an inclusion, is the ability to skip passes if a
+particular backend does not wish to have a pass or if it wants
+special treatment in some way.</li><li>Another route is to have Alternative passes that are mutually
+exclusive but converge upon the same points.</li></ul><h4 id=api-functions>API Functions</h4><p>With the environment out of the way, let us consider how one is
+supposed to use this environment and the functions on the environment.</p><p>The pipeline is intended to grow a single compile function, in which
+we shall call <code>eval</code>. We do this by registering the
+<code>Pipeline.step.named</code> into the environment. After we register all the
+steps, we can chose if the pipeline stops early, introspect if some
+pass fails etc. When it comes time to executing the pipeline a <code>run</code>
+function will be given that takes the <code>Pipeline.Environment.t</code> value
+and starts executing the registered passes, stopping either when a
+pass fails, the <code>stopping_step</code> says we should stop at this step, or
+if we have successfully compiled the given form.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#75715e>(** [register_step] registers the pipeline function to the environment *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>val</span> register_step <span style=color:#f92672>:</span> Step.named CircularList.t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span>
+</span></span></code></pre></div><p><code>register_step</code> has the simple job of taking a named pass and added it
+to the <code>registered_pipeline</code> type. Note that we take a
+<code>CircularList.t</code> over this type to simply make the operation
+monoidal. An example implementation could be something as simple as.</p><p>This will be a core way one interacts with the pipeline</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#a6e22e>registerStep</span> pass <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  modify <span style=color:#f92672>@</span><span style=color:#e6db74>&#34;registeredPipeline&#34;</span> (<span style=color:#f92672>&lt;&gt;</span> pass)
+</span></span></code></pre></div><p>While the above function is useful, it has no way of helping us build
+groups of steps. For that we have</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#75715e>(** [def_pipline_group] creates a named group of pipeline steps or a
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * nested grouping of pipeline steps *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>val</span> def_pipline_group
+</span></span><span style=display:flex><span>    <span style=color:#f92672>:</span> NameSymbol.t
+</span></span><span style=display:flex><span>     <span style=color:#f92672>-&gt;</span> Step.named CircularList.t <span style=color:#66d9ef>list</span>
+</span></span><span style=display:flex><span>     <span style=color:#f92672>-&gt;</span> Step.named CircularList.t
+</span></span></code></pre></div><p>This function should remind one of the <code>testGroup</code> function that is
+used in <code>Testy</code> tests. It has the same behavior as that, we can then
+register this function with <code>register_step</code>.</p><p>The next set of functions deal with talking about stopping the
+pipeline early.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>val</span> stop_at <span style=color:#f92672>:</span> NameSymbol.t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>val</span> stop_at_nothing <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span>
+</span></span></code></pre></div><p><code>stop_at</code>, tells the environment to simply stop when we reach the pass
+with the given name. <code>stop_at_nothing</code> just resets the stopping
+behavior to none.</p><p>The next function in the environment is the actual <code>eval</code> function
+which is responsible for running the code.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#75715e>(** [eval] is responsible for taking the environment, running it
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * to the desired  point and giving back what data is left.
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * The output type should be more carefully considered
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * and have many operations on it.
+</span></span></span><span style=display:flex><span><span style=color:#75715e> *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>val</span> eval <span style=color:#f92672>:</span> t <span style=color:#f92672>-&gt;</span> computational_input
+</span></span></code></pre></div><p>The <code>eval</code> function has a tough job, as that it is responsible for
+taking the information in the <code>t</code> type and properly threading the
+calls to the passes.</p><p>As mentioned in the doc comment above the function, the output type is
+not fully considered. For this proposal we chose the
+<code>computational_input</code> type.</p><p>This ends the core API of the <code>Pipeline</code>, more functions will be
+needed in regards to introspecting the output type, but these are the
+core functions to properly construct and change the core environment.</p><h4 id=the-full-api>The Full API</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Pipeline</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(** [env_or_sexp] expresses data that may be already added to the
+</span></span></span><span style=display:flex><span><span style=color:#75715e>  environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * or are still in a base sexp form that requires no lookup *)</span> <span style=color:#66d9ef>type</span>
+</span></span><span style=display:flex><span>   env_or_sexp <span style=color:#f92672>=</span> <span style=color:#f92672>|</span> <span style=color:#a6e22e>InEnv</span> <span style=color:#66d9ef>of</span> NameSymbol.t <span style=color:#f92672>|</span> <span style=color:#a6e22e>Sexp</span> <span style=color:#66d9ef>of</span> Sexp.t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(** [working_environment] serves as the input data relevant to any
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * pipeline step function. This is what is actively being processed
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * in the pipeline itself.  *)</span> <span style=color:#66d9ef>type</span> working_environment <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>   current_expression <span style=color:#f92672>:</span> env_or_sexp <span style=color:#66d9ef>list</span><span style=color:#f92672>;</span> context <span style=color:#f92672>:</span> Sexp.t Context.t <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(** [surrounding_environment] serves as the minimum surrounding
+</span></span></span><span style=display:flex><span><span style=color:#75715e>  information
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * in the environment of the Pipeline Steps.  *)</span> <span style=color:#66d9ef>type</span>
+</span></span><span style=display:flex><span>   surrounding_environment <span style=color:#f92672>=</span> <span style=color:#f92672>{</span> <span style=color:#75715e>(* This will be taken as a read value
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   *)</span> <span style=color:#75715e>(** The [current_step_name] represents the current running step
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   name *)</span> current_step_name <span style=color:#f92672>:</span> NameSymbol.t option<span style=color:#f92672>;</span> meta_information <span style=color:#f92672>:</span>
+</span></span><span style=display:flex><span>   Meta.t <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(** [computational_input] is the actual data passed into the
+</span></span></span><span style=display:flex><span><span style=color:#75715e>  [Step.t] type.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * The [language_data] field serves as the direct data that the
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     direct data
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * a pass wishes to take, while [surrounding_data] serves as extra
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * constraints that one wants to include.  *)</span> <span style=color:#66d9ef>type</span>
+</span></span><span style=display:flex><span>   computational_input <span style=color:#f92672>=</span> <span style=color:#f92672>{</span> language_data <span style=color:#f92672>:</span> working_environment<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>   surrounding_data <span style=color:#f92672>:</span> surrounding_environment<span style=color:#f92672>;</span> <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Step</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span> <span style=color:#75715e>(** the pipeline step, takes the entire
+</span></span></span><span style=display:flex><span><span style=color:#75715e>    [computational_input] as input.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * This is quite a wide type in that it has data that a pass does
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       not
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * directly want to handle.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * Thus it is expected one works with the [Automation] module, to
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       make
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * fulfilling both the [ComputationResult.t] and the input form
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     bearable.  *)</span> <span style=color:#75715e>(* May promote [working_environment] to
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     [information_record] *)</span> <span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span> computational_input <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>     working_environment ComputationResult.t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>type</span> named <span style=color:#f92672>=</span> <span style=color:#f92672>{</span> name <span style=color:#f92672>:</span> NameSymbol.t<span style=color:#f92672>;</span> func <span style=color:#f92672>:</span> t <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> name_pass <span style=color:#f92672>:</span> t <span style=color:#f92672>-&gt;</span> NameSymbol.t <span style=color:#f92672>-&gt;</span> named
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> name_of_pass <span style=color:#f92672>:</span> named <span style=color:#f92672>-&gt;</span> NameSymbol.t <span style=color:#66d9ef>end</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Environment</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>      <span style=color:#75715e>(** [information] serves as the public facing data to the environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * that passes can access
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       *)</span>
+</span></span><span style=display:flex><span>      information <span style=color:#f92672>:</span> computational_input<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>      <span style=color:#75715e>(* All other information is made to be exclusive with the Pipeline as
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * a whole that the Steps do not bother with.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * This consists of information like how to deal with Traces between passes
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * to the entire pass infrastructure itself.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       *)</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>      <span style=color:#75715e>(** [registered_pipeline] is the pipeline itself.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * It features all the steps named and registered with the system *)</span>
+</span></span><span style=display:flex><span>      registered_pipeline <span style=color:#f92672>:</span> Step.named CircularList.t<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>      stopping_step <span style=color:#f92672>:</span> NameSymbol.t option
+</span></span><span style=display:flex><span>    <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [register_step] registers the pipeline function to the environment *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> register_step <span style=color:#f92672>:</span> Step.named CircularList.t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [def_pipline_group] creates a named group of pipeline steps or a
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * nested grouping of pipeline steps.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> def_pipline_group
+</span></span><span style=display:flex><span>        <span style=color:#f92672>:</span> NameSymbol.t
+</span></span><span style=display:flex><span>          <span style=color:#f92672>-&gt;</span> Step.named CircularList.t <span style=color:#66d9ef>list</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>-&gt;</span> Step.named CircularList.t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [stop_at] tells the environment to stop at a particular step when
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * running the environment.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> stop_at <span style=color:#f92672>:</span> NameSymbol.t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [stop_at_nothing] tells the environment to run the compiler fully.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> stop_at_nothing <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [eval] is responsible for taking the environment, running it
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * to the desired  point and giving back what data is left.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * The output type should be more carefully considered
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * and have many operations on it.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> eval <span style=color:#f92672>:</span> t <span style=color:#f92672>-&gt;</span> computational_input
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [run] serves as the running point, the unit argument is a placeholder
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * for the monadic functions used to build up the environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * the [t] is the given pre-built environemnt
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> run <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span> <span style=color:#f92672>-&gt;</span> t <span style=color:#f92672>-&gt;</span> computational_input
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> extract <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span> <span style=color:#f92672>-&gt;</span> t
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>end</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><h3 id=rational-1>Rational</h3><p>This Structure was chosen to maximize the following:</p><ol><li>Find a way to minimize the Haskell Hassle</li><li>Give a straight forward way to obsolete any <code>EasyPipeline</code> notions.</li><li>Give a flexible architecture which can satisfy our current and
+future needs.</li></ol><p>With that said there may some questions one may have in regards to the
+API</p><h4 id=why-a-registration-system>Why A Registration System?</h4><p>This is brought up in regards to why not a more functional approach to
+composition, indeed the following does not look functional!</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#a6e22e>eval</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>extract <span style=color:#f92672>$</span> <span style=color:#66d9ef>do</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>register_step
+</span></span><span style=display:flex><span>    (<span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>def_pipeline_group <span style=color:#e6db74>&#34;Desugar&#34;</span>
+</span></span><span style=display:flex><span>                                 [ <span style=color:#66d9ef>Desugar</span><span style=color:#f92672>.</span>condToIf
+</span></span><span style=display:flex><span>                                 , <span style=color:#66d9ef>Desugar</span><span style=color:#f92672>.</span>ifToCond
+</span></span><span style=display:flex><span>                                 , <span style=color:#f92672>...</span>])
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>register_step
+</span></span><span style=display:flex><span>    (<span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>def_pipeline_group <span style=color:#e6db74>&#34;Contextify&#34;</span>
+</span></span><span style=display:flex><span>                                 [ <span style=color:#66d9ef>Contextify</span><span style=color:#f92672>.</span>resolveInfix
+</span></span><span style=display:flex><span>                                 , <span style=color:#f92672>...</span>])
+</span></span><span style=display:flex><span>  <span style=color:#f92672>...</span>
+</span></span></code></pre></div><p>This was chosen over the more functional <a href=https://heliaxdev.github.io/juvix-docs/docs/overview/pipeline/idealized/>approach given in the
+idealized pipeline proposal</a>,
+because it allows us to name each step and stop in the middle of any
+of them. Where as the more functional approach would leave that
+structure ambiguous and behave much like a <code>tagless final</code> system
+where the constructors fold onto itself leaving no room for
+interpretation of the bare structure.</p><p>Further interest was given in programatically moving passes around to
+properly see what makes the most sense. The given registration system
+along with an extension to talk about dependencies in passes would
+allow this experimentation.</p><h3 id=examples>Examples</h3><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#66d9ef>module</span> EasyPipeline <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>passNames</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>CircularList</span><span style=color:#f92672>.</span>t <span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span>t
+</span></span><span style=display:flex><span><span style=color:#a6e22e>passNames</span> <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  fmap
+</span></span><span style=display:flex><span>    (<span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span>nameOfPass <span style=color:#f92672>.</span> <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>registered_pipeline)
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Compiler</span><span style=color:#f92672>.</span>eval
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>prettyPassNames</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>IO</span> ()
+</span></span><span style=display:flex><span><span style=color:#a6e22e>prettyPassNames</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>CircularList</span><span style=color:#f92672>.</span>prettyPrintList passNmaes
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>runToCondWithTrace</span> <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>stopAt <span style=color:#e6db74>&#34;Desugar.if-to-case&#34;</span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>-- Extra functions to trace what we care about</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>enableRecursively [<span style=color:#e6db74>&#34;Pass.cond-to-if&#34;</span>]
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>λ</span><span style=color:#f92672>&gt;</span> <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>run runToCond <span style=color:#66d9ef>Compiler</span><span style=color:#f92672>.</span>eval <span style=color:#f92672>&gt;&gt;|</span> <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>run<span style=color:#f92672>-</span>trace
+</span></span></code></pre></div><h2 id=the-berlin-pipeline-automatisierung>The Berlin Pipeline Automatisierung</h2><p>We have seen in the Step section that we have a general consistent
+data type for a Pipeline Step, however we also discovered that the
+type is:</p><ul><li>Too large and has matters a pass should not worry about.</li><li>Has no environment effect, so the pass is expected to be in IO to
+get information.</li></ul><p>Thus we propose the <code>Automation</code> module to alleviate these issues.</p><h3 id=specification-1>Specification</h3><h4 id=input-and-output-types>Input and Output Types</h4><p>To simplify matters to what a pass cares about we transform the
+<code>computational_input</code> form below</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> env_or_sexp <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#a6e22e>InEnv</span> <span style=color:#66d9ef>of</span> NameSymbol.t
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#a6e22e>Sexp</span>  <span style=color:#66d9ef>of</span> Sexp.t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> working_environment <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>  current_expression <span style=color:#f92672>:</span> env_or_sexp <span style=color:#66d9ef>list</span><span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  context            <span style=color:#f92672>:</span> Sexp.t Context.t
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> computational_input <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>  language_data    <span style=color:#f92672>:</span> working_environment<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  surrounding_data <span style=color:#f92672>:</span> surrounding_environment<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span></code></pre></div><p>into</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>type</span> pass_argument <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>  current <span style=color:#f92672>:</span> Pipeline.env_or_sexp<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  context <span style=color:#f92672>:</span> Sexp.t Context.t
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> simplified_pass_argument <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>  current <span style=color:#f92672>:</span> Sexp.t<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  context <span style=color:#f92672>:</span> Sexp.t Context.t
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span></code></pre></div><p>Notice, how instead of working over a <code>Pipeline.env_or_sexp list</code> for
+the current expression we instead worry about the current
+expression. And we even have a more simplified version that removes
+the <code>InEnv</code> potential of the <code>Pipeline.env_or_sexp</code> in the
+<code>simplified_pass_argument</code>. This allows a pass to not worry about if a
+<code>Sexp.t</code> is referenced in the environment, and allows all the
+attention to be had on the transformation if the pass simply does not
+care.</p><p>Further, the entire <code>surrounding_environemnt</code> is dropped from the
+signature entirely.</p><p>This information is not completely gone, but instead we relegate it to
+the environment surrounding the pass, rather than a direct input to
+the pass.</p><p>The output of the pass also moves away from returning a
+<code>working_environment ComputationResult.t</code></p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>type</span> working_environment <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>  current_expression <span style=color:#f92672>:</span> env_or_sexp <span style=color:#66d9ef>list</span><span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  context            <span style=color:#f92672>:</span> Sexp.t Context.t
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>ComputationResult</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|</span> <span style=color:#a6e22e>Success</span> <span style=color:#66d9ef>of</span> <span style=color:#f92672>{</span>meta <span style=color:#f92672>:</span> Meta.t<span style=color:#f92672>;</span> result           <span style=color:#f92672>:</span> <span style=color:#66d9ef>&#39;</span>a<span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|</span> <span style=color:#a6e22e>Failure</span> <span style=color:#66d9ef>of</span> <span style=color:#f92672>{</span>meta <span style=color:#f92672>:</span> Meta.t<span style=color:#f92672>;</span> partial_feedback <span style=color:#f92672>:</span> <span style=color:#66d9ef>&#39;</span>a option<span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><p>into a more stream-lined type</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#a6e22e>ProcessJob</span> <span style=color:#66d9ef>of</span> process_job_no_env
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#a6e22e>UpdateJob</span>  <span style=color:#66d9ef>of</span> <span style=color:#f92672>{</span> new_context <span style=color:#f92672>:</span> Sexp.t Context.t<span style=color:#f92672>;</span> process <span style=color:#f92672>:</span> process_job <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> job <span style=color:#f92672>=</span> t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> stage
+</span></span><span style=display:flex><span>  <span style=color:#f92672>=</span> <span style=color:#a6e22e>Current</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#a6e22e>FromTopToCurrent</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#a6e22e>Eval</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> process_job <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>  current   <span style=color:#f92672>:</span>  Pipeline.env_or_sexp<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  new_forms <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>stage <span style=color:#f92672>*</span> Pipeline.env_or_sexp<span style=color:#f92672>)</span> <span style=color:#66d9ef>list</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> process_job_no_env <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>  current <span style=color:#f92672>:</span> Sexp.t<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  new_forms <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>stage <span style=color:#f92672>*</span> Sexp.t<span style=color:#f92672>)</span> <span style=color:#66d9ef>list</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>}</span>
+</span></span></code></pre></div><p>What changes, that instead of giving back a list of
+<code>current_expressions</code>, we instead have this idea of a <code>process_job</code> to
+go along with the new input type of taking a single expression.</p><p>What this means, is that for any pass which defines a new top level
+definitions to be consumed, instead of adding it to the
+<code>current_expression</code> list, we instead add it to the <code>new_forms</code>,
+letting the Automation handle how this commits back to
+<code>current_expresions</code>. The current expression stays as the current
+expression, thus the pass takes a <code>Pipeline.env_or_sexp</code> and gives
+back a potentially new <code>Sexp.t</code>, with any new definitions as
+<code>new_forms</code>.</p><p>Further we introduce the idea of an <code>UpdateJob</code> vs a <code>ProcessJob</code>,
+meaning that instead of every pass that does not touch the <code>context</code>
+just giving back the current <code>context</code>, we can instead denote, with
+the <code>ProcessJob</code> that our pass has no changes to the context
+itself. The <code>UpdateJob</code> indicates that we have changed the context, so
+commit back the changed context.</p><p>This also explains the difference between <code>process_job_no_env</code> and
+<code>process_job</code>, since the <code>ProcessJob</code> can not touch the <code>Context</code> it
+ca not change any reference to the name which can be found in
+<code>Pipeline.env_or_sexp</code></p><p>Lastly, we introduce the concept of staging the newly defined
+expressions through the <code>stage</code> type. This can take the form of
+<code>Current</code>, <code>FromTopToCurrent</code>, or <code>Eval</code>.</p><ul><li><code>Current</code> would act exactly like adding any new expression to the
+<code>current_expression</code> list.</li><li><code>FromTopToCurrent</code> acts almost like <code>Current</code> but runs all passes
+that have previous ran to the current position on the new <code>Sexp.t</code>
+defined</li><li><code>Eval</code> runs the entire compiler on the newly defined <code>Sexp.t</code>,
+updating the <code>Context</code> in the process before we proceed with the
+<code>current</code> form.</li></ul><p>This is best to seen in action in the ###Examples Section</p><h4 id=environment-types-and-effects>Environment Types and Effects</h4><p>With the input and output types out of the way (<code>pass_argument -> job</code>), we can now talk about the surrounding environment that was
+alluded too earlier.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#75715e>(* This represents the monad type that we require for a pass *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#66d9ef>type</span> <span style=color:#a6e22e>MonadEff</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a t
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a output_eff
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(* Trace State effect *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>val</span> get_trace <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span>    <span style=color:#f92672>-&gt;</span> Trace.t t
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>val</span> set_trace <span style=color:#f92672>:</span> Trace.t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span>    t
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(* feed_back State effect *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>val</span> get_feedback <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span>    <span style=color:#f92672>-&gt;</span> Feedback.t t
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>val</span> set_feedback <span style=color:#f92672>:</span> Feedback.t  <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span>   t
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(* This is in all likelihood what is needed to setup the environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * usurping the above effects for actually setting up the pass
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * we leave the above effects for demonstrative purposes
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>val</span> has_env   <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span> <span style=color:#f92672>-&gt;</span> Pipeline.surrounding_environment t
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>val</span> set_env   <span style=color:#f92672>:</span> Pipeline.surrounding_environment <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span> t
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(* Comonad effect *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>val</span> run      <span style=color:#f92672>:</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>&#39;</span>a output_eff
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><p>This OCaml module refers to the following Haskell signatures</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#66d9ef>type</span> <span style=color:#66d9ef>class</span> <span style=color:#66d9ef>Functor</span> m <span style=color:#f92672>=&gt;</span> <span style=color:#66d9ef>Comonad</span> m <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>  run <span style=color:#f92672>::</span> m a <span style=color:#f92672>-&gt;</span> a
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> <span style=color:#66d9ef>HasTrace</span>     m <span style=color:#f92672>=</span> <span style=color:#66d9ef>HasState</span> <span style=color:#f92672>@</span><span style=color:#e6db74>&#34;trace&#34;</span> <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>t
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> <span style=color:#66d9ef>HasFeedback</span>  m <span style=color:#f92672>=</span> <span style=color:#66d9ef>HasState</span> <span style=color:#f92672>@</span><span style=color:#e6db74>&#34;Feedback&#34;</span>  <span style=color:#66d9ef>Feedback</span><span style=color:#f92672>.</span>t
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> <span style=color:#66d9ef>HasMeta</span>      m <span style=color:#f92672>=</span> (<span style=color:#66d9ef>HasFeedback</span> m, <span style=color:#66d9ef>HasTrace</span> m)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>type</span> <span style=color:#66d9ef>HasEnv</span> m <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  (<span style=color:#66d9ef>HasMeta</span> m, <span style=color:#66d9ef>HasReader</span> <span style=color:#f92672>@</span><span style=color:#e6db74>&#34;CurrentStepName&#34;</span> (<span style=color:#66d9ef>Maybe</span> <span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span>t) m)
+</span></span></code></pre></div><p>What is important here is that the <code>has_nev</code>/<code>HasEnv</code> effect entails
+all the data that is passed through <code>surrounding_environment</code> plus any
+pass specific data that it may want.</p><p>This allows the automation tooling to automatically hook into the
+environment of the pass to convert the <code>job</code> into a
+<code>ComputationResult.t job</code> for any given environment that a pass may
+care about.</p><p>We can see this signature in action with the automation functions of
+this module.</p><h4 id=automation-abstractions>Automation Abstractions</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#75715e>(* Type class in Haskell that dictates being able to extract to a step *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Runable</span> <span style=color:#f92672>:</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>functor</span> <span style=color:#f92672>(</span><span style=color:#a6e22e>M</span> <span style=color:#f92672>:</span> <span style=color:#a6e22e>MonadEff</span><span style=color:#f92672>)</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>=</span> <span style=color:#66d9ef>&#39;</span>a M.t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [run] runs the given environment, extracting out a result with meta data
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * over the resulting value.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> run <span style=color:#f92672>:</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>&#39;</span>a ComputationResult.t M.output_eff
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [apply_simplified_pass] serves as a HOF that allows for passes to be
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * a more simplified type, namely a function that takes a [pass_arugment]
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * to an effectual result over [job] that determines how the pass should
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * be brought together.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * Note that [Pipeline.computational_input -&gt; Pipeline.working_environment t]
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * is an approximation of the [Step.t] type without the Meta information attached
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> apply_simplified_pass
+</span></span><span style=display:flex><span>        <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>pass_argument <span style=color:#f92672>-&gt;</span> job t<span style=color:#f92672>)</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>-&gt;</span> Pipeline.computational_input
+</span></span><span style=display:flex><span>          <span style=color:#f92672>-&gt;</span> Pipeline.working_environment t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [run_simplified_pass] simply combines the [run] function with
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * [apply_simplified_pass], to get the output effect, which corresponds to a
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * [Pipeline.Step.t] with an effect attached to it
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> run_simplified_pass
+</span></span><span style=display:flex><span>        <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>pass_argument <span style=color:#f92672>-&gt;</span> job M.output_eff<span style=color:#f92672>)</span>
+</span></span><span style=display:flex><span>          <span style=color:#f92672>-&gt;</span> Pipeline.computational_input
+</span></span><span style=display:flex><span>          <span style=color:#f92672>-&gt;</span> Pipeline.working_environment ComputationResult.t M.output_eff
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** [simplify] allows a pass to ignore the fact that expression coming in may
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * be added to the [Context.t] already, and we can act as if it were just a
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * normal [Sexp.t] being passed in.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> simplify <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>simplified_pass_argument <span style=color:#f92672>-&gt;</span> job M.output_eff<span style=color:#f92672>)</span>
+</span></span><span style=display:flex><span>                   <span style=color:#f92672>-&gt;</span> <span style=color:#f92672>(</span>pass_argument <span style=color:#f92672>-&gt;</span> job M.output_eff<span style=color:#f92672>)</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><p>This roughly corresponds to the Haskell Signature</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#66d9ef>type</span> <span style=color:#66d9ef>class</span> <span style=color:#66d9ef>HasExtract</span> a m <span style=color:#f92672>|</span> a <span style=color:#f92672>-&gt;</span> m <span style=color:#66d9ef>where</span> extract <span style=color:#f92672>::</span> a x <span style=color:#f92672>-&gt;</span> m (<span style=color:#66d9ef>ComputationResult</span><span style=color:#f92672>.</span>t x)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>data</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>PassArgument</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>=</span> <span style=color:#66d9ef>PassArg</span> { context <span style=color:#f92672>::</span> <span style=color:#66d9ef>Context</span><span style=color:#f92672>.</span>t <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>t, current <span style=color:#f92672>::</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>t }
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>transformOutputType</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span>workingEnvironment
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- we share the one m monad here for the function</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- because we will extract it after we run the m effect</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>applySimplifiedPass</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>::</span> (<span style=color:#66d9ef>HasTrace</span> m, <span style=color:#66d9ef>HasMeta</span> m)
+</span></span><span style=display:flex><span>  <span style=color:#f92672>=&gt;</span> (<span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>PassArgument</span> <span style=color:#f92672>-&gt;</span> m <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>t)
+</span></span><span style=display:flex><span>  <span style=color:#75715e>-- These form Pipeline.Step.t for some m over the</span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>-- output modulo the ComputationResult.t over it</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ComputationalInput</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>-&gt;</span> m <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span><span style=color:#66d9ef>WorkingEnvironment</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>runSimplifiedPass</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>::</span> (<span style=color:#66d9ef>HasExtract</span> _a m)
+</span></span><span style=display:flex><span>  <span style=color:#f92672>=&gt;</span> (<span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>PassArgument</span> <span style=color:#f92672>-&gt;</span> m <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>t)
+</span></span><span style=display:flex><span>  <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ComputationalInput</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>-&gt;</span> m (<span style=color:#66d9ef>ComputationResult</span><span style=color:#f92672>.</span>t <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span><span style=color:#66d9ef>WorkingEnvironment</span>)
+</span></span><span style=display:flex><span><span style=color:#a6e22e>runSimplifiedPass</span> f <span style=color:#f92672>=</span> <span style=color:#66d9ef>do</span>
+</span></span><span style=display:flex><span>  extract <span style=color:#f92672>.</span> applySimplifiedPass f
+</span></span></code></pre></div><p>We can see the <code>extract</code> or <code>run</code> as the OCaml version calls it, takes
+the environment needed to run the pass, runs it, and gives us back out
+a <code>ComputationResult.t</code> over the output type in the effect.</p><p>The <code>HasMeta</code> and <code>HasTrace</code> effects are needed in practice to support
+this. Note that we also get an output Monad type. This is needed as
+the pass may invoke IO actions, and thus we really get back an
+<code>output_eff</code>ect from the pass itself.</p><p>The <code>applySimplifiedPass</code> reflects the underlying purpose of the
+<code>Automation</code> modules. Namely a pass has become as simple as
+<code>(Automation.PassArgument -> m Automation.t)</code>, where we take only what
+we care about, and return back an effect over the <code>job</code> type. the goal
+of this function then becomes the following:</p><ol><li>Split the surrounding_environment to the env of the pass</li><li>Split the list of expressions into one and invoke the pass one or
+many times</li><li>Take a list of <code>job</code>/<code>Automation.t</code> types and give back a
+<code>Pipeline.WorkingEnvironment</code></li></ol><p>Since the module has enough information via the constraints, this is
+fairly easy to achieve.</p><p>This leads into <code>runSimplifiedPass</code>, which simply just composes
+<code>applySimplifiedPass</code> and <code>extract</code>/<code>run</code>. We can see here how these
+two functions combine and fulfill the signature of <code>Pipeline.Step.t</code>
+which we will repast here</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Step</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span> computational_input <span style=color:#f92672>-&gt;</span> working_environment ComputationResult.t
+</span></span></code></pre></div><p>The <code>simplify</code> function is a simplification that allows as pass to not
+worry if the argument has come from the context or not. This is useful
+for passes which do simple transformations but are ran after the point
+in which functions show up in the environment, or any passes before
+that we know the terms don&rsquo;t show up in the environment.</p><h4 id=full-api>Full API</h4><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#75715e>(** the job of [Automation] is to make the step function more amenable to writing passes
+</span></span></span><span style=display:flex><span><span style=color:#75715e> * It is not ergonomic to take extra information one may not care
+</span></span></span><span style=display:flex><span><span style=color:#75715e>about *)</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Automation</span> <span style=color:#f92672>:</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> stage <span style=color:#f92672>=</span> <span style=color:#a6e22e>Current</span> <span style=color:#f92672>|</span> <span style=color:#a6e22e>FromTopToCurrent</span> <span style=color:#f92672>|</span> <span style=color:#a6e22e>Eval</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> process_job <span style=color:#f92672>=</span> <span style=color:#f92672>{</span> current <span style=color:#f92672>:</span> Pipeline.env_or_sexp<span style=color:#f92672>;</span> new_forms <span style=color:#f92672>:</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>(</span>stage <span style=color:#f92672>*</span> Pipeline.env_or_sexp<span style=color:#f92672>)</span> <span style=color:#66d9ef>list</span> <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> t <span style=color:#f92672>=</span> <span style=color:#f92672>|</span> <span style=color:#a6e22e>ProcessJob</span> <span style=color:#66d9ef>of</span> process_job_no_env
+</span></span><span style=display:flex><span>           <span style=color:#f92672>|</span> <span style=color:#a6e22e>UpdateJob</span> <span style=color:#66d9ef>of</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>               new_context <span style=color:#f92672>:</span> Sexp.t Context.t<span style=color:#f92672>;</span> process <span style=color:#f92672>:</span> process_job
+</span></span><span style=display:flex><span>             <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> job <span style=color:#f92672>=</span> t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(** [pass_arguments] is a pipeline processing function, namely we
+</span></span></span><span style=display:flex><span><span style=color:#75715e>  wrap
+</span></span></span><span style=display:flex><span><span style=color:#75715e>   * the current expression and the context into a single function *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> pass_argument <span style=color:#f92672>=</span> <span style=color:#f92672>{</span> current <span style=color:#f92672>:</span> Pipeline.env_or_sexp<span style=color:#f92672>;</span> context <span style=color:#f92672>:</span>
+</span></span><span style=display:flex><span>  Sexp.t Context.t <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(* This represents the monad type that we require for a pass *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>module</span> <span style=color:#66d9ef>type</span> <span style=color:#a6e22e>MonadEff</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a t
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a output_eff
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(* Trace State effect *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> get_trace <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span>    <span style=color:#f92672>-&gt;</span> Trace.t t
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> set_trace <span style=color:#f92672>:</span> Trace.t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span>    t
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(* feed_back State effect *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> get_feedback <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span>       <span style=color:#f92672>-&gt;</span> Feedback.t t
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> set_feedback <span style=color:#f92672>:</span> Feedback.t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span>   t
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(* combining the two effects above  *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> get_meta <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span>   <span style=color:#f92672>-&gt;</span> Meta.t t
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> set_meta <span style=color:#f92672>:</span> Meta.t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span> t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(* This is in all likelihood what is needed to setup the environment
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * usurping the above effects for actually setting up the pass
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     * we leave the above effects for demonstrative purposes
+</span></span></span><span style=display:flex><span><span style=color:#75715e>     *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> has_env   <span style=color:#f92672>:</span> <span style=color:#66d9ef>unit</span> <span style=color:#f92672>-&gt;</span> Pipeline.surrounding_environment t
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> set_env   <span style=color:#f92672>:</span> Pipeline.surrounding_environment <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>unit</span> t
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(* Comonad effect *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>val</span> run      <span style=color:#f92672>:</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>&#39;</span>a output_eff
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>end</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>val</span> transform_output_type
+</span></span><span style=display:flex><span>      <span style=color:#f92672>:</span> job <span style=color:#66d9ef>list</span> <span style=color:#f92672>-&gt;</span> Pipeline.working_environment
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>(* Type class in Haskell that dictates being able to extract to a step *)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>module</span> <span style=color:#a6e22e>Runable</span> <span style=color:#f92672>:</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>functor</span> <span style=color:#f92672>(</span><span style=color:#a6e22e>M</span> <span style=color:#f92672>:</span> <span style=color:#a6e22e>MonadEff</span><span style=color:#f92672>)</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>sig</span>
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>type</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>=</span> <span style=color:#66d9ef>&#39;</span>a M.t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>      <span style=color:#75715e>(** [run] runs the given environment, extracting out a result with meta data
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * over the resulting value.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       *)</span>
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>val</span> run <span style=color:#f92672>:</span> <span style=color:#66d9ef>&#39;</span>a t <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>&#39;</span>a ComputationResult.t M.output_eff
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>      <span style=color:#75715e>(** [apply_simplified_pass] serves as a HOF that allows for passes to be
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * a more simplified type, namely a function that takes a [pass_arugment]
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * to an effectual result over [job] that determines how the pass should
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * be brought together.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * Note that [Pipeline.computational_input -&gt; Pipeline.working_environment t]
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * is an approximation of the [Step.t] type without the Meta information attached
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       *)</span>
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>val</span> apply_simplified_pass
+</span></span><span style=display:flex><span>          <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>pass_argument <span style=color:#f92672>-&gt;</span> job t<span style=color:#f92672>)</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>-&gt;</span> Pipeline.computational_input
+</span></span><span style=display:flex><span>            <span style=color:#f92672>-&gt;</span> Pipeline.working_environment t
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>      <span style=color:#75715e>(** [run_simplified_pass] simply combines the [run] function with
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * [apply_simplified_pass], to get the output effect, which corresponds to a
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * [Pipeline.Step.t] with an effect attached to it
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       *)</span>
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>val</span> run_simplified_pass
+</span></span><span style=display:flex><span>          <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>pass_argument <span style=color:#f92672>-&gt;</span> job M.output_eff<span style=color:#f92672>)</span>
+</span></span><span style=display:flex><span>            <span style=color:#f92672>-&gt;</span> Pipeline.computational_input
+</span></span><span style=display:flex><span>            <span style=color:#f92672>-&gt;</span> Pipeline.working_environment ComputationResult.t M.output_eff
+</span></span><span style=display:flex><span>      <span style=color:#75715e>(** [simplify] allows a pass to ignore the fact that expression coming in may
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * be added to the [Context.t] already, and we can act as if it were just a
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       * normal [Sexp.t] being passed in.
+</span></span></span><span style=display:flex><span><span style=color:#75715e>       *)</span>
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>val</span> simplify <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>simplified_pass_argument <span style=color:#f92672>-&gt;</span> job M.output_eff<span style=color:#f92672>)</span>
+</span></span><span style=display:flex><span>                   <span style=color:#f92672>-&gt;</span> <span style=color:#f92672>(</span>pass_argument <span style=color:#f92672>-&gt;</span> job M.output_eff<span style=color:#f92672>)</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>end</span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>end</span>
+</span></span></code></pre></div><h2 id=examples-1>Examples</h2><p>It would be remiss of us to not include any examples in this
+demonstration, so we provide a few examples of using the library. The
+code below were taken from a now deprecated compiler, so the code was
+used for a period.</p><p>In the following code snippets Ι make heavy use of my <a href=https://github.com/mariari/Misc-ML-Scripts/tree/master/Haskell/Sexp>Sexp library</a></p><p>which has many tools that make working with s-expressions quite
+simple. The library offers automatic deserialization of data types,
+along with predicate searches. The default way to use the library for
+passes is to make a Haskell ADT and have the library run on all data
+that can be deserailzied. This is great in that you can enforce
+exhaustion throughout the passes even though one is operating on
+s-expressions. Some of the examples given below were before this was
+implemented, and so use the library in a more tedious way of matching
+symbols. Since both ways of working with the API&rsquo;s can be seen, one
+can compare and contrast them.</p><h3 id=deusgaring-cond>Deusgaring Cond</h3><p>Let our first example be on desugaring <code>cond</code>. <code>Cond</code> is a staple in
+lisp code</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-lisp data-lang=lisp><span style=display:flex><span>(defun dispatch (x)
+</span></span><span style=display:flex><span>  (cond ((<span style=color:#a6e22e>evenp</span> x) <span style=color:#ae81ff>42</span>)
+</span></span><span style=display:flex><span>        ((<span style=color:#a6e22e>=</span> x <span style=color:#ae81ff>5</span>)   <span style=color:#ae81ff>0</span>)
+</span></span><span style=display:flex><span>        (<span style=color:#66d9ef>t</span>         <span style=color:#ae81ff>24</span>)))
+</span></span><span style=display:flex><span>DISPATCH
+</span></span><span style=display:flex><span>CL-USER&gt; (dispatch <span style=color:#ae81ff>6</span>)
+</span></span><span style=display:flex><span><span style=color:#ae81ff>42</span> (<span style=color:#ae81ff>6</span> bits, <span style=color:#ae81ff>#x2A</span><span style=color:#f92672>,</span> <span style=color:#ae81ff>#o52</span><span style=color:#f92672>,</span> <span style=color:#ae81ff>#b101010</span>)
+</span></span><span style=display:flex><span>CL-USER&gt; (dispatch <span style=color:#ae81ff>8</span>)
+</span></span><span style=display:flex><span><span style=color:#ae81ff>42</span> (<span style=color:#ae81ff>6</span> bits, <span style=color:#ae81ff>#x2A</span><span style=color:#f92672>,</span> <span style=color:#ae81ff>#o52</span><span style=color:#f92672>,</span> <span style=color:#ae81ff>#b101010</span>)
+</span></span><span style=display:flex><span>CL-USER&gt; (dispatch <span style=color:#ae81ff>7</span>)
+</span></span><span style=display:flex><span><span style=color:#ae81ff>24</span> (<span style=color:#ae81ff>5</span> bits, <span style=color:#ae81ff>#x18</span><span style=color:#f92672>,</span> <span style=color:#ae81ff>#o30</span><span style=color:#f92672>,</span> <span style=color:#ae81ff>#b11000</span>)
+</span></span><span style=display:flex><span>CL-USER&gt; (dispatch <span style=color:#ae81ff>5</span>)
+</span></span><span style=display:flex><span><span style=color:#ae81ff>0</span> (<span style=color:#ae81ff>0</span> bits, <span style=color:#ae81ff>#x0</span><span style=color:#f92672>,</span> <span style=color:#ae81ff>#o0</span><span style=color:#f92672>,</span> <span style=color:#ae81ff>#b0</span>)
+</span></span><span style=display:flex><span>CL-USER&gt;
+</span></span></code></pre></div><p>here <code>cond</code> is really just a multiway if</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-lisp data-lang=lisp><span style=display:flex><span>(<span style=color:#a6e22e>macroexpand-1</span> <span style=color:#f92672>&#39;</span>(cond ((<span style=color:#a6e22e>evenp</span> x) <span style=color:#ae81ff>42</span>)
+</span></span><span style=display:flex><span>                     ((<span style=color:#a6e22e>=</span> x <span style=color:#ae81ff>5</span>)   <span style=color:#ae81ff>0</span>)
+</span></span><span style=display:flex><span>                     (<span style=color:#66d9ef>t</span>         <span style=color:#ae81ff>24</span>)))
+</span></span><span style=display:flex><span>(IF (EVENP X)
+</span></span><span style=display:flex><span>    <span style=color:#ae81ff>42</span>
+</span></span><span style=display:flex><span>    (IF (<span style=color:#a6e22e>=</span> X <span style=color:#ae81ff>5</span>)
+</span></span><span style=display:flex><span>        <span style=color:#ae81ff>0</span>
+</span></span><span style=display:flex><span>        (THE <span style=color:#66d9ef>T</span> <span style=color:#ae81ff>24</span>)))
+</span></span><span style=display:flex><span><span style=color:#66d9ef>T</span>
+</span></span></code></pre></div><p>So the desugaring strategy is rather straightforward, given a <code>sexp</code>
+with <code>cond</code> in the front, then desugar the <code>cond</code> into a series of If&rsquo;s.</p><p>This can be written somewhat simply using the s-expression library.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#75715e>-- | @condTransform@ - CondTransform turns the cond form of the fronted</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- language into a series of ifs</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- - BNF input form:</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>--   + (:cond (pred-1 result-1) … (pred-n result-n))</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- - BNF output form:</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>--   + (if pred-1 result-1 (if pred-2 result-2 (… (if pred-n result-n))))</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condTransform</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condTransform</span> xs <span style=color:#f92672>=</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>mapPredStar xs (<span style=color:#f92672>==</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>nameCond) condToIf
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>    condToIf sexp<span style=color:#f92672>@</span>(<span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Atom</span> atom <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.:&gt;</span> <span style=color:#66d9ef>_</span>)
+</span></span><span style=display:flex><span>      <span style=color:#f92672>|</span> <span style=color:#66d9ef>Just</span> cond <span style=color:#f92672>&lt;-</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>toCond sexp,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>Just</span> last <span style=color:#f92672>&lt;-</span> lastMay (cond <span style=color:#f92672>^.</span> entailments) <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>let</span> acc <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>              <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span><span style=color:#66d9ef>IfNoElse</span> (last <span style=color:#f92672>^.</span> predicate) (last <span style=color:#f92672>^.</span> answer)
+</span></span><span style=display:flex><span>                <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>fromIfNoElse
+</span></span><span style=display:flex><span>         <span style=color:#66d9ef>in</span> foldr generation acc (initSafe (cond <span style=color:#f92672>^.</span> entailments))
+</span></span><span style=display:flex><span>              <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>addMetaToCar atom
+</span></span><span style=display:flex><span>    condToIf <span style=color:#66d9ef>_</span> <span style=color:#f92672>=</span> <span style=color:#a6e22e>error</span> <span style=color:#e6db74>&#34;malformed cond&#34;</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>--</span>
+</span></span><span style=display:flex><span>    generation predAns acc <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span><span style=color:#66d9ef>If</span> (predAns <span style=color:#f92672>^.</span> predicate) (predAns <span style=color:#f92672>^.</span> answer) acc
+</span></span><span style=display:flex><span>        <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>fromIf
+</span></span></code></pre></div><p>This code simply folds if on the <code>cond</code>. More complicated than a
+native lisp version but sufficient to demonstrate the point. The
+<code>mapPredStar</code> automatically searches any of the s-expressions given at
+a given point. However this code does not account for the context of
+the language that is down the pipeline. This is where the Berlin
+pipeline comes in.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#a6e22e>condPass</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Named</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condPass</span> <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  (<span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>withScope <span style=color:#e6db74>&#34;Desugar.cond-runner&#34;</span> <span style=color:#66d9ef>[]</span> <span style=color:#f92672>.</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>simplify condTrans)
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>runSimplifiedPass
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span>namePass <span style=color:#e6db74>&#34;Desugar.cond-to-if&#34;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condTrans</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>SimplifiedPassArgument</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>MinimalMIO</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Job</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condTrans</span> simplify <span style=color:#f92672>=</span> <span style=color:#66d9ef>do</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>withScope <span style=color:#e6db74>&#34;Desugar.condTrans&#34;</span> [show (simplify <span style=color:#f92672>^.</span> current)] <span style=color:#f92672>$</span> <span style=color:#66d9ef>do</span>
+</span></span><span style=display:flex><span>    condTransform (simplify <span style=color:#f92672>^.</span> current)
+</span></span><span style=display:flex><span>      <span style=color:#f92672>&gt;&gt;|</span> (`<span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ProcessNoEnv</span>` <span style=color:#66d9ef>[]</span>)
+</span></span><span style=display:flex><span>      <span style=color:#f92672>&gt;&gt;|</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ProcessJob</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- | @condTransform@ - CondTransform turns the cond form of the fronted</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- language into a series of ifs</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- - BNF input form:</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>--   + (:cond (pred-1 result-1) … (pred-n result-n))</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>-- - BNF output form:</span>
+</span></span><span style=display:flex><span><span style=color:#75715e>--   + (if pred-1 result-1 (if pred-2 result-2 (… (if pred-n result-n))))</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condTransform</span> <span style=color:#f92672>::</span> (<span style=color:#66d9ef>MonadIO</span> m, <span style=color:#66d9ef>Meta</span><span style=color:#f92672>.</span><span style=color:#66d9ef>HasMeta</span> m) <span style=color:#f92672>=&gt;</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span> m <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>condTransform</span> xs <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>withScope <span style=color:#e6db74>&#34;Desugar.condTransform&#34;</span> [show xs] <span style=color:#f92672>$</span> <span style=color:#66d9ef>do</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>traversePredStar xs (<span style=color:#f92672>==</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>nameCond) condToIf
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>    condToIf sexp<span style=color:#f92672>@</span>(<span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Atom</span> atom <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.:&gt;</span> <span style=color:#66d9ef>_</span>) recur
+</span></span><span style=display:flex><span>      <span style=color:#f92672>|</span> <span style=color:#66d9ef>Just</span> cond <span style=color:#f92672>&lt;-</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>toCond sexp,
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>Just</span> last <span style=color:#f92672>&lt;-</span> lastMay (cond <span style=color:#f92672>^.</span> entailments) <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>let</span> acc <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>              <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span><span style=color:#66d9ef>IfNoElse</span> (last <span style=color:#f92672>^.</span> predicate) (last <span style=color:#f92672>^.</span> answer)
+</span></span><span style=display:flex><span>                <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>fromIfNoElse
+</span></span><span style=display:flex><span>         <span style=color:#66d9ef>in</span> foldr generation acc (initSafe (cond <span style=color:#f92672>^.</span> entailments))
+</span></span><span style=display:flex><span>              <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>addMetaToCar atom
+</span></span><span style=display:flex><span>              <span style=color:#f92672>|&gt;</span> recur
+</span></span><span style=display:flex><span>    condToIf <span style=color:#66d9ef>_</span> <span style=color:#66d9ef>_</span> <span style=color:#f92672>=</span> <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span>throw <span style=color:#f92672>$</span> <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>MalformedData</span> <span style=color:#e6db74>&#34;cond is in an invalid format&#34;</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>--</span>
+</span></span><span style=display:flex><span>    generation predAns acc <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span><span style=color:#66d9ef>If</span> (predAns <span style=color:#f92672>^.</span> predicate) (predAns <span style=color:#f92672>^.</span> answer) acc
+</span></span><span style=display:flex><span>        <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>fromIf
+</span></span></code></pre></div><p>Here we have refactored the code to be in the Berlin Pipeline
+format. <code>condTransform</code> hardly changed, we only improve upon it with</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span> <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>withScope <span style=color:#e6db74>&#34;Desugar.condTransform&#34;</span> [show xs] <span style=color:#f92672>$</span>
+</span></span></code></pre></div><p>which adds tracing information to the given point, so if we wanted to
+debug this code we can see precisely the input and outputs of the
+<code>condTransform</code>.</p><p>Further there are two new functions <code>condTrans</code> and
+<code>condPass</code>. <code>condTrans</code> is the main boilerplate for telling the
+pipeline that we don&rsquo;t care about the environment, so please simplify
+those details for us, and also that we don&rsquo;t affect the context, we
+simply only process some S-expressions into a new form. The <code>condPass</code>
+now simply tells the <code>Automation</code> module to apply the stated
+simplifications and give the pass a name. Thus we&rsquo;ve introduced 13
+lines of boilerplate, however they have given us</p><ol><li>The ability to apply our simple pass on the entire state of the language</li><li>Tracing at every level, so if we so wished we can see the effect of
+the pass even without stopping at desired location</li><li>A clear and clean stopping point so that we can debug our compiler.</li></ol><h3 id=infix-resolution>Infix Resolution</h3><p>It is all well and good to show a pass which does not rely upon the
+context to feed it information. However, what about a more complex
+pass that relies upon information in expressions above the current
+one?</p><p>Well for this, we will display code related to <code>infix resolution</code>. This requires closures, as the language that used this
+had the ability to make new infix symbols and declare their infixivity
+on the fly.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#66d9ef>data</span> <span style=color:#66d9ef>Infix</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>=</span> <span style=color:#66d9ef>Infix</span>
+</span></span><span style=display:flex><span>      { infixOp <span style=color:#f92672>::</span> <span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>,
+</span></span><span style=display:flex><span>        infixLt <span style=color:#f92672>::</span> (<span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>Bind</span><span style=color:#f92672>.</span><span style=color:#66d9ef>BinderPlus</span> <span style=color:#66d9ef>Infix</span>)),
+</span></span><span style=display:flex><span>        infixInf <span style=color:#f92672>::</span> <span style=color:#66d9ef>Infix</span>
+</span></span><span style=display:flex><span>      }
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#66d9ef>InfixNoMore</span>
+</span></span><span style=display:flex><span>      { infixOp <span style=color:#f92672>::</span> <span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>,
+</span></span><span style=display:flex><span>        infixLt <span style=color:#f92672>::</span> (<span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>Bind</span><span style=color:#f92672>.</span><span style=color:#66d9ef>BinderPlus</span> <span style=color:#66d9ef>Infix</span>)),
+</span></span><span style=display:flex><span>        infixRt <span style=color:#f92672>::</span> (<span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>Bind</span><span style=color:#f92672>.</span><span style=color:#66d9ef>BinderPlus</span> <span style=color:#66d9ef>Infix</span>))
+</span></span><span style=display:flex><span>      }
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>deriving</span> (<span style=color:#66d9ef>Show</span>, <span style=color:#66d9ef>Generic</span>, <span style=color:#66d9ef>Eq</span>)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixConversionPass</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Named</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixConversionPass</span> <span style=color:#f92672>=</span> mkPass name trans
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>    name <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;infixConversion&#34;</span>
+</span></span><span style=display:flex><span>    trans <span style=color:#f92672>=</span> mkTrans name infixConversionTransform
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixConversionTransform</span> <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>  ( <span style=color:#66d9ef>HasThrow</span> <span style=color:#e6db74>&#34;error&#34;</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> m,
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Feedback</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Eff</span> m,
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>HasClosure</span> m,
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>MonadIO</span> m
+</span></span><span style=display:flex><span>  ) <span style=color:#f92672>=&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Context</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  m <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixConversionTransform</span> ctx <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  infixConversion ctx <span style=color:#f92672>|&gt;</span> traverseOnDeserialized
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixConversion</span> <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>  (<span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ErrS</span> m, <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>HasClosure</span> m) <span style=color:#f92672>=&gt;</span> <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Pass</span> m <span style=color:#66d9ef>Infix</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixConversion</span> context atom rec&#39; <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>case</span> atom <span style=color:#66d9ef>of</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>P</span> (<span style=color:#66d9ef>Bind</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Other</span> inf) <span style=color:#66d9ef>_</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>do</span>
+</span></span><span style=display:flex><span>      grouped <span style=color:#f92672>&lt;-</span> groupInfix context inf
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>case</span> <span style=color:#66d9ef>Shunt</span><span style=color:#f92672>.</span>shunt grouped <span style=color:#66d9ef>of</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>Right</span> shunted <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>          rec&#39; (convertShunt shunted)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>Left</span> (<span style=color:#66d9ef>Shunt</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Clash</span> pred1 pred2) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>          <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span>throwSexp (<span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Clash</span> pred1 pred2)
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>Left</span> <span style=color:#66d9ef>Shunt</span><span style=color:#f92672>.</span><span style=color:#66d9ef>MoreEles</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>          <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span>throwSexp <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ImpossibleMoreEles</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>_</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span>handleAtom context atom rec&#39; <span style=color:#f92672>&gt;&gt;|</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Atom</span>
+</span></span></code></pre></div><p>The trick of the more context aware passes is the notion of the <code>Bind</code>
+module. Since passes that rely on the semantics of expressions that
+come before it, it is not possible to generically process syntax
+without know the language&rsquo;s <code>special forms</code>. These are the base forms
+that fundamentally change semantics in the way that code walkers ought
+to respect. An <a href=https://www.cs.cmu.edu/Groups/AI/html/cltl/clm/node59.html>Example list can be found for CL</a>.</p><p>For our language ours looks like</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#66d9ef>data</span> <span style=color:#66d9ef>BinderPlus</span> a
+</span></span><span style=display:flex><span>  <span style=color:#f92672>=</span> <span style=color:#66d9ef>Other</span> a
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#66d9ef>Lambda</span>
+</span></span><span style=display:flex><span>      { binderPlusArgs <span style=color:#f92672>::</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>BinderPlus</span> a),
+</span></span><span style=display:flex><span>        binderPlusBody <span style=color:#f92672>::</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>BinderPlus</span> a)
+</span></span><span style=display:flex><span>      }
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#66d9ef>Declaim</span>
+</span></span><span style=display:flex><span>      { binderPlusClaim <span style=color:#f92672>::</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>BinderPlus</span> a),
+</span></span><span style=display:flex><span>        binderPlusBody <span style=color:#f92672>::</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>BinderPlus</span> a)
+</span></span><span style=display:flex><span>      }
+</span></span><span style=display:flex><span>  <span style=color:#f92672>|</span> <span style=color:#66d9ef>LetMatch</span>
+</span></span><span style=display:flex><span><span style=color:#f92672>...</span>
+</span></span></code></pre></div><p>The list goes on. The <code>Other</code> sum type is the data that you the
+programmer cares about. Thus using the <code>Sexp</code> library, one can
+deseralize all the special forms of the language, handle them
+generically with <code>handleAtom</code>, and then continue processing the form
+they actually care about in the <code>Other</code>.</p><p>There are a few other parts to note, namely the <code>rec'</code> parameter, the
+<code>Infix</code> data type, and the <code>mkTrans/mkPass</code> abstractions. the <code>rec'</code>
+is there, so that when the pass returns, it will be run on the
+returned form. This is exactly like how macros are applied in a LISP
+like language. The <code>Infix</code> data structure is interesting, as we don&rsquo;t
+automatically derive it&rsquo;s serializer and deserializer instead we write</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixRename</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Options</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixRename</span> <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>changeName
+</span></span><span style=display:flex><span>    (<span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>defaultOptions <span style=color:#f92672>@</span><span style=color:#66d9ef>Infix</span>)
+</span></span><span style=display:flex><span>    (<span style=color:#66d9ef>Map</span><span style=color:#f92672>.</span>fromList [(<span style=color:#e6db74>&#34;InfixNoMore&#34;</span>, <span style=color:#e6db74>&#34;:infix&#34;</span>)])
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>instance</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>DefaultOptions</span> <span style=color:#66d9ef>Infix</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>instance</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Serialize</span> <span style=color:#66d9ef>Infix</span> <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>  serialize <span style=color:#f92672>=</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>serializeOpt infixRename
+</span></span><span style=display:flex><span>  deserialize <span style=color:#f92672>=</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>deserializeOpt infixRename
+</span></span></code></pre></div><p>Which is to say, we make <code>InfixNoMore</code> share the deserializer name of
+<code>Infix</code>, so that the serializer will try <code>Infix</code> first, when that
+fails it will fall over to constructing an <code>InfixiNoMore</code>. This
+automatically puts our code into an easy way of grouping Infix&rsquo;s into
+a list.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#66d9ef>data</span> <span style=color:#66d9ef>InfFlat</span> a <span style=color:#f92672>=</span> <span style=color:#66d9ef>Inf</span> <span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>|</span> <span style=color:#66d9ef>Ele</span> a
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixToInfFlat</span> <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Infix</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>NonEmpty</span> (<span style=color:#66d9ef>InfFlat</span> (<span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>Bind</span><span style=color:#f92672>.</span><span style=color:#66d9ef>BinderPlus</span> <span style=color:#66d9ef>Infix</span>)))
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixToInfFlat</span> (<span style=color:#66d9ef>InfixNoMore</span> op lt rt) <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>NonEmpty</span><span style=color:#f92672>.</span>fromList [<span style=color:#66d9ef>Ele</span> lt, <span style=color:#66d9ef>Inf</span> op, <span style=color:#66d9ef>Ele</span> rt]
+</span></span><span style=display:flex><span><span style=color:#a6e22e>infixToInfFlat</span> (<span style=color:#66d9ef>Infix</span> op lt rt) <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>NonEmpty</span><span style=color:#f92672>.</span>fromList [<span style=color:#66d9ef>Ele</span> lt, <span style=color:#66d9ef>Inf</span> op] <span style=color:#f92672>&lt;&gt;</span> infixToInfFlat rt
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>groupInfix</span> <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>  (<span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ErrS</span> f, <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>HasClosure</span> f) <span style=color:#f92672>=&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Context</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Infix</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  f (<span style=color:#66d9ef>NonEmpty</span> (<span style=color:#66d9ef>Shunt</span><span style=color:#f92672>.</span><span style=color:#66d9ef>PredOrEle</span> <span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> (<span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>B</span> (<span style=color:#66d9ef>Bind</span><span style=color:#f92672>.</span><span style=color:#66d9ef>BinderPlus</span> <span style=color:#66d9ef>Infix</span>))))
+</span></span><span style=display:flex><span><span style=color:#a6e22e>groupInfix</span> context inf <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  traverse f (infixToInfFlat inf)
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>    f (<span style=color:#66d9ef>Ele</span> a) <span style=color:#f92672>=</span> pure (<span style=color:#66d9ef>Shunt</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Ele</span> a)
+</span></span><span style=display:flex><span>    f (<span style=color:#66d9ef>Inf</span> op) <span style=color:#f92672>=</span> <span style=color:#66d9ef>do</span>
+</span></span><span style=display:flex><span>      prec <span style=color:#f92672>&lt;-</span> <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span>lookupPrecedence op context
+</span></span><span style=display:flex><span>      pure (<span style=color:#66d9ef>Shunt</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Precedence</span> (precedenceConversion op prec))
+</span></span></code></pre></div><p>The exact details don&rsquo;t matter, we essentially just get it into a
+format that <a href=https://github.com/mariari/Misc-ML-Scripts/blob/master/Haskell/shunt.hs>the shunt yard module</a> would like.</p><p>Lastly, we have the <code>mkTrans/mkPass</code>. These are just abstractions
+which help moves the Berlin Pipeline into being more specific for the
+task. This is similar to how the <a href=https://en.wikipedia.org/wiki/Metaobject>Meta Object Protocol</a> allowed various
+companies to mold the behavior of the object system to their tastes.</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#a6e22e>mkTrans</span> <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>-- | The name of the transform to be traced</span>
+</span></span><span style=display:flex><span>  ( <span style=color:#66d9ef>Context</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>MinimalMIO</span> <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>
+</span></span><span style=display:flex><span>  ) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>SimplifiedPassArgument</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>MinimalMIO</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Job</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>mkTrans</span> name trans simplify <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>withScope scopeName [show (simplify <span style=color:#f92672>^.</span> current)] <span style=color:#f92672>$</span>
+</span></span><span style=display:flex><span>    trans (simplify <span style=color:#f92672>^.</span> context) (simplify <span style=color:#f92672>^.</span> current)
+</span></span><span style=display:flex><span>      <span style=color:#f92672>&gt;&gt;|</span> (`<span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ProcessNoEnv</span>` <span style=color:#66d9ef>[]</span>)
+</span></span><span style=display:flex><span>      <span style=color:#f92672>&gt;&gt;|</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>ProcessJob</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>    scopeName <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;Context&#34;</span> <span style=color:#f92672>&lt;&gt;</span> name <span style=color:#f92672>&lt;&gt;</span> <span style=color:#e6db74>&#34;trans&#34;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>mkPass</span> <span style=color:#f92672>::</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>NameSymbol</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#75715e>-- | The name of the transform to be traced</span>
+</span></span><span style=display:flex><span>  ( <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>SimplifiedPassArgument</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Env</span><span style=color:#f92672>.</span><span style=color:#66d9ef>MinimalMIO</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Job</span>
+</span></span><span style=display:flex><span>  ) <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Named</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>mkPass</span> name trans <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  ( <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>withScope
+</span></span><span style=display:flex><span>      runnerName
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>[]</span>
+</span></span><span style=display:flex><span>      <span style=color:#f92672>.</span> simplifiedTrans
+</span></span><span style=display:flex><span>  )
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>runSimplifiedPass
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span><span style=color:#66d9ef>T</span>
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span>namePass passName
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>    simplifiedTrans <span style=color:#f92672>=</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>simplify trans
+</span></span><span style=display:flex><span>    runnerName <span style=color:#f92672>=</span> passName <span style=color:#f92672>&lt;&gt;</span> <span style=color:#e6db74>&#34;runner&#34;</span>
+</span></span><span style=display:flex><span>    passName <span style=color:#f92672>=</span> <span style=color:#e6db74>&#34;Context&#34;</span> <span style=color:#f92672>&lt;&gt;</span> name
+</span></span></code></pre></div><p>Overall we can see a few things.</p><ol><li>The insistence on S-expressions has been a boon in that generic
+special forms can be handled specially and done uniformly
+throughout the codebase without having to repeat the logic for
+different ADT&rsquo;s.<ul><li>Further safety is not lost, as we still have exhaustion on the
+special forms if we decide to add a new one!</li></ul></li><li>After abstracting out common pass infrastructure, the boilerplate
+even for a context aware pass is less than 12 lines of code.</li><li>The boilerplate around the API is fixed for any processing job.</li></ol><h3 id=a-non-processing-example>A non processing example.</h3><p>This pass was not included with the compiler unlike the other two
+passes, however it was included with the original Berlin Pipeline
+proposal, and shows off the more conceptually complex <code>Update</code> job.</p><p>What this means, is that the processing is generally much more
+laborious than it ought to be, however the example is still quite
+illustrative.</p><p>Let our running example be</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-lisp data-lang=lisp><span style=display:flex><span><span style=color:#75715e>;; type foo = Bar int int | Baz int int</span>
+</span></span><span style=display:flex><span>(<span style=color:#e6db74>:type</span> foo ()
+</span></span><span style=display:flex><span>  (Bar int int)
+</span></span><span style=display:flex><span>  (Baz int int))
+</span></span></code></pre></div><p>Let us first try to compile this down like</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-lisp data-lang=lisp><span style=display:flex><span>(<span style=color:#e6db74>:declare-type</span> foo ())
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>(<span style=color:#e6db74>:constructor</span> Bar foo int int)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>(<span style=color:#e6db74>:constructor</span> Baz foo int int)
+</span></span></code></pre></div><p>We can use the new-pipeline like so</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-haskell data-lang=haskell><span style=display:flex><span><span style=color:#a6e22e>deconstructPass</span> <span style=color:#f92672>::</span> <span style=color:#66d9ef>Pipeline</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Named</span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>deconstructPass</span> <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Step</span><span style=color:#f92672>.</span>name_pass
+</span></span><span style=display:flex><span>    (<span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>runSimplifiedPass deconstructType)
+</span></span><span style=display:flex><span>    <span style=color:#e6db74>&#34;Desugar.deocnstruct-type&#34;</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#a6e22e>deocnstructType</span> <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>{current} <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>with <span style=color:#e6db74>&#34;Desugar.deconstruct-type&#34;</span> [show current] <span style=color:#f92672>$</span>
+</span></span><span style=display:flex><span>    <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span>foldSearchPredWithExtra
+</span></span><span style=display:flex><span>      (<span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span>simplify f) (<span style=color:#f92672>==</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>typeName) current
+</span></span><span style=display:flex><span>    <span style=color:#f92672>|&gt;</span> <span style=color:#a6e22e>\</span><span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Extra</span>{<span style=color:#66d9ef>data</span>, extra} <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>       <span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>PrcoessJob</span> {current <span style=color:#f92672>=</span> <span style=color:#66d9ef>data</span>, newForms <span style=color:#f92672>=</span> extra}
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>where</span>
+</span></span><span style=display:flex><span>    f car cdr <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>      <span style=color:#66d9ef>Trace</span><span style=color:#f92672>.</span>with <span style=color:#e6db74>&#34;Desugar.deconstruct-type-pass&#34;</span> [show car, show cdr] <span style=color:#f92672>$</span>
+</span></span><span style=display:flex><span>        <span style=color:#66d9ef>case</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>toType (car <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.:&gt;</span> cdr) <span style=color:#66d9ef>of</span>
+</span></span><span style=display:flex><span>          <span style=color:#66d9ef>Just</span> typ <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>let</span> extraData <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>              (typ <span style=color:#f92672>^.</span> body)
+</span></span><span style=display:flex><span>               <span style=color:#f92672>&gt;&gt;=</span> (<span style=color:#a6e22e>\</span><span style=color:#66d9ef>case</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Sum</span> {name, arguments} <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>                            <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Constructor</span> name (typ <span style=color:#f92672>^.</span> name) arguments
+</span></span><span style=display:flex><span>                            <span style=color:#f92672>|&gt;</span> pure
+</span></span><span style=display:flex><span>                          <span style=color:#66d9ef>_</span> <span style=color:#f92672>-&gt;</span> <span style=color:#66d9ef>[]</span>
+</span></span><span style=display:flex><span>                   )
+</span></span><span style=display:flex><span>               <span style=color:#f92672>&gt;&gt;|</span> <span style=color:#a6e22e>\</span>x <span style=color:#f92672>-&gt;</span> (<span style=color:#66d9ef>Automation</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Current</span>, <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>fromConstructor x)
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>let</span> currentForm <span style=color:#f92672>=</span>
+</span></span><span style=display:flex><span>               <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span><span style=color:#66d9ef>DeclareType</span> (typ <span style=color:#f92672>^.</span> name) (typ <span style=color:#f92672>^.</span> arguments)
+</span></span><span style=display:flex><span>               <span style=color:#f92672>|&gt;</span> <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span>fromDeclareType
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>            <span style=color:#66d9ef>Structure</span><span style=color:#f92672>.</span><span style=color:#66d9ef>Extra</span> {<span style=color:#66d9ef>data</span> <span style=color:#f92672>=</span> currentForm, extra <span style=color:#f92672>=</span> extraData}
+</span></span><span style=display:flex><span>          <span style=color:#66d9ef>Nothing</span> <span style=color:#f92672>-&gt;</span>
+</span></span><span style=display:flex><span>           <span style=color:#75715e>-- we get back a Failure on the ComputationResult</span>
+</span></span><span style=display:flex><span>           throw <span style=color:#f92672>@</span><span style=color:#e6db74>&#34;failure&#34;</span> (<span style=color:#66d9ef>ComputationResult</span><span style=color:#f92672>.</span><span style=color:#66d9ef>InvalidForm</span> (car <span style=color:#66d9ef>Sexp</span><span style=color:#f92672>.:&gt;</span> cdr))
+</span></span></code></pre></div><p><code>deconstructorPass</code> is the pass itself, that we can directly
+register. the implementation is held in the function
+<code>deconstructType</code>. We show in gory details how precisely this pass
+works. we search for a certain structure, using the normal <code>Sexp</code>
+functions, once it&rsquo;s found we run our pass which we call <code>f</code>.</p><p><code>f</code> now constructs two pieces of data, the current form to return,
+along with any new forms which are defined from this. We construct the
+extra forms by checking if they are sum types, if they are, then great
+they are a constructor. We then take the constructors and say that we
+will compile it <code>Current</code>ly along with the <code>declaration-type</code>. Note
+that if we wanted to compile these ahead of time we could simply
+replace <code>Current</code> with <code>Eval</code>. In this case, it makes more sense to
+compile them <code>Current</code>ly instead of ahead of time. As for the current
+form, this gets transformed into a generic declaration with the
+arguments in tact, and given back as the current expression. Finally,
+the <code>FromEvalTopToCurrent</code> uses the <code>current_step_name</code> discussed in
+the ##Pipeline Section, to run the compiler up until the current point
+and then work with them <code>Current</code>ly together.</p><p>in 25 lines we have an entire new compiler pass! That may seem like a
+lot of lines, however most of them are simply type conversion to type
+safe versions in which to do processing on, or shifting one data type
+to another.</p><h2 id=berlin-pipeline-extensions>Berlin Pipeline: Extensions</h2><h3 id=injection-passes>Injection Passes</h3><p>In short the Injection passes are a way to register pipeline passes
+that run on every step. For both passes that take singular
+<code>env_or_sexp</code> through <code>Automation</code>, and through passes that ought to
+be run befroe and after the <code>Step.t</code> type.</p><p>To view the issue on inspiration and the state of this extension
+please read</p><p>The signature laid out to do this work is as follows</p><p>The siganture of these functions are</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span><span style=color:#66d9ef>open</span> <span style=color:#a6e22e>Pipeline</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>val</span> Env.registerBeforePass <span style=color:#f92672>:</span> Automation.pass_argument <span style=color:#f92672>-&gt;</span> m Automation.job
+</span></span><span style=display:flex><span><span style=color:#66d9ef>val</span> Env.registerAfterPass  <span style=color:#f92672>:</span> Automation.pass_argument <span style=color:#f92672>-&gt;</span> m Automation.job
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span><span style=color:#66d9ef>val</span> Env.register_before_pass_entireList <span style=color:#f92672>:</span> computational_input <span style=color:#f92672>-&gt;</span> m computational_output
+</span></span><span style=display:flex><span><span style=color:#66d9ef>val</span> Env.register_after_pass_entireList  <span style=color:#f92672>:</span> comptuational_input <span style=color:#f92672>-&gt;</span> m computational_output
+</span></span></code></pre></div><p>As for us the <code>Env.register*Pass</code> variants will run on individual
+s-expressions, and will run before or after the pass itself. When one
+runs <code>Automation.aplySimplifiedPass</code> that function will automatically
+apply the registered functions.</p><p>the <code>Env.rgister*PassEntireList</code> variants will run before or after
+each step at the eval level. Thus eval will handle running these
+registered steps before and after each step is called.</p><p>The implementation of this requires tweaking where functions are
+stored, since we want to tweak <code>surroudning_environemnt</code> to be the
+following</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-ocaml data-lang=ocaml><span style=display:flex><span>  <span style=color:#66d9ef>type</span> around <span style=color:#f92672>=</span> <span style=color:#a6e22e>Before</span> <span style=color:#f92672>|</span> <span style=color:#a6e22e>After</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> surrounding_environment <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(* This will be taken as a read value *)</span>
+</span></span><span style=display:flex><span>    <span style=color:#75715e>(** The [current_step_name] represents the current running step name *)</span>
+</span></span><span style=display:flex><span>    current_step_name <span style=color:#f92672>:</span> NameSymbol.t option<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>    meta_information  <span style=color:#f92672>:</span> Meta.t<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>    on_single_pass    <span style=color:#f92672>:</span> <span style=color:#f92672>(</span>around <span style=color:#f92672>*</span> Automation.pass_argument <span style=color:#f92672>-&gt;</span> Automation.pass_argument aroundIO<span style=color:#f92672>)</span> <span style=color:#66d9ef>list</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> around_env <span style=color:#f92672>=</span> <span style=color:#f92672>{</span>
+</span></span><span style=display:flex><span>    trace    <span style=color:#f92672>:</span> Trace.t<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>    feedback <span style=color:#f92672>:</span> Feedback.t<span style=color:#f92672>;</span>
+</span></span><span style=display:flex><span>  <span style=color:#f92672>}</span>
+</span></span><span style=display:flex><span>
+</span></span><span style=display:flex><span>  <span style=color:#66d9ef>type</span> aroundEnvIO a <span style=color:#f92672>=</span> <span style=color:#a6e22e>MinIO</span> <span style=color:#f92672>{</span>run <span style=color:#f92672>:</span> Sexp.t <span style=color:#f92672>(</span>IO.t around_env State.t<span style=color:#f92672>)</span> Except.t<span style=color:#f92672>}</span>
+</span></span></code></pre></div><p>Since this requires values in <code>Pipeline</code> to have information about
+<code>Pipeline.Automation</code>, we must remove all data declarations in
+<code>Pipeline.Automation</code>, and put them in <code>Pipeline</code>, rexporting them in
+<code>Pipeline.Automation</code></p><p><a id=nav-menu><strong>Site menu</strong></a></p><ul><li><a href=/>Home</a></li><li><a href=/posts/>Posts</a></li></ul><p><a href=#>Back to top</a></p></body></html>

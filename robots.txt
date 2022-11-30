@@ -1,0 +1,3 @@
+User-agent: *
+
+http://mariari.github.io/sitemap.xml
