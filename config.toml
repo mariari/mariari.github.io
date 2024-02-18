@@ -14,3 +14,6 @@ enableRobotsTXT = true
     name = "Posts"
     url = "/posts/"
     weight = 2
+  [[menu.main]]
+    name = "Public Notes"
+    url = "notes/table-of-contents-2qzwdq1sjk7rkkm19wn9xo3xm.html"

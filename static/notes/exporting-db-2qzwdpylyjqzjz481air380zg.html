@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Exporting DB</title>
+
+    <!-- browser setup -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta content="IE=edge" http-equiv="X-UA-Compatible">
+
+    <!-- page meta information -->
+    <meta name="description" content="Exporting DB">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="gtoolkit book">
+    <meta property="og:title" content="Exporting DB">
+    <meta property="og:url" content="https://book.gtoolkit.com/exporting-db-2qzwdpylyjqzjz481air380zg.html">
+    <meta property="og:description" content="Exporting DB">
+
+    <!-- CSS styles -->
+    <link rel="stylesheet" href="assets/vendor/awesomefonts/css/all.css">
+    <link rel="stylesheet" href="assets/vendor/bootstrap/css/bootstrap.min.css">
+    <link rel="stylesheet" href="assets/v2/src/css/lepiter-common.css">
+    <link rel="stylesheet" href="assets/v2/src/css/lepiter-snippets.css">
+    <link rel="stylesheet" href="assets/v2/src/css/vs.css">
+</head>
+<body>
+
+    <div class="content">
+        <div class="row le-row">
+
+            <!-- side menu with header -->
+
+            <div class="col-lg-3 le-nav-column">
+                <div class="side-menu sticky-top navbar-expand-lg le-nav-scrollable le-nav-container">
+                    <header class="navbar navbar-light bg-white sticky-top px-3 le-nav-footer">
+                        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#le-nav-collapsable" arial-controls="le-nav-collapsable" arial-expanded="false" arial-label="Toggle navigation">
+                            <i class="fas fa-bars">
+                            </i>
+                        </button>
+                        <p class="le-logo">
+                            <a class="le-logo-link" href="https://gtoolkit.com" alt="Glamorous Toolkit"><span class="le-logo-g">glamorous</span><span class="le-logo-t">toolkit</span></a> <span class="le-logo-version">v1.0.535</span>
+                        </p>
+                    </header>
+
+                    <nav id="le-nav-collapsable" class="navbar-collapse collapse le-nav-root">
+
+                        <!-- navigation start -->
+
+                        <ul class="nav flex-column le-nav le-nav-level-0">  <li class="nav-item  le-nav-item le-nav-level-1">    <a class="nav-link le-nav-link le-nav-level-1" href="table-of-contents-2qzwdq1sjk7rkkm19wn9xo3xm.html">Table of Contents    </a>    <ul class="nav flex-column le-nav le-nav-level-1">      <li class="nav-item  le-nav-item le-nav-level-2">        <a class="nav-link le-nav-link le-nav-level-2" href="mahjong-ajc74mr0i1pgt8td5660dkhg5.html">Mahjong        </a>        <ul class="nav flex-column le-nav le-nav-level-2">          <li class="nav-item  le-nav-item le-nav-level-3">            <a class="nav-link le-nav-link le-nav-level-3" href="mahjong-tactics-1l41j2ln59fumi6gfkewcjimu.html">Mahjong Tactics            </a>          </li>        </ul>      </li>    </ul>  </li></ul>
+
+                        <!-- navigation end -->
+                    </nav>
+                </div>
+            </div>
+
+            <!-- main content -->
+
+            <div class="col-lg-9 le-main-col">
+                <div class="container min-height py-5 le-main-container">
+                    <main>
+                        <h1 class="le-main-title">Exporting DB</h1>
+
+                        <!-- page content start -->
+
+                        <div class="snippet textual-snippet code-snippet pharo-snippet fullWidth">  <pre class="no_bottom_margin">page := thisSnippet page.sequencer := LeExportUUIDSequencer new.pageLinks := LeExportPageLinksBuilder new		database: page database;		html;		sequencer: sequencer;		build;		links.ourPageLink := pageLinks		linkForPage: page		ifFound: #yourself		ifNone: [ self error: 'This should not happen' ].aContext := LeHtmlContext new		page: page;		pageLinks: pageLinks;		date: (Date today printFormat: #(1 2 3 $/ 1 1));		sequencer: sequencer.LeHtmlAssetsUtility addGtBookAssetsInto: aContext resources.	anExporter := LeHtmlBookExporter new		database: page database;		sequencer: sequencer;		mainPage: 'Notes TOC';		piece: LeHtmlGtBookPiece gtBook;		resources: aContext resources.		anExporter export.anExporter saveToRootDirectory: FileLocator imageDirectory / 'foo'."htmlString := a contents.aContext resources.aContext assembler assemble.LeExportResourcesDirectorySaver new	resources: aContext resources;	rootDirectory: FileLocator imageDirectory / 'foo';	save.FileLocator imageDirectory / 'foo'.FileLocator imageDirectory / 'foo'	/ ((page title asString copyReplaceAll: ' ' with: '_') , '.html')	writeStreamDo: [ :aStream | aStream nextPutAll: htmlString ]"  </pre></div><div class="snippet textual-snippet text-snippet paragraphWidth"></div>
+
+                        <!-- page content end -->
+                    </main>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <footer class="text-center py-5 le-footer">
+        <p class="le-footer-credits">
+            Powered by <a class="le-footer-link" href="https://lepiter.com">Lepiter</a> | <a class="le-footer-link" href="https://feenk.com/privacy">Privacy Policy</a>
+        </p>
+    </footer>
+
+    <!-- scripts -->
+    <script type="text/javascript" src="assets/vendor/jquery/js/jquery.js"></script>
+    <script type="text/javascript" src="assets/vendor/bootstrap/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="assets/v2/src/js/datefns.min.js"></script>
+    <script type="text/javascript" src="assets/v2/src/js/highlight.pack.js"></script>
+    <script type="text/javascript" src="assets/v2/src/js/lepiter-common.js"></script>
+    <script type="text/javascript" src="assets/v2/src/js/lepiter-snippets.js"></script>
+    <script type="text/javascript" src="assets/v2/src/js/lepiter-time.js"></script>
+</body>
+</html>
