@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Exporting DB</title>
+    <title>Mahjong Algorithms and Exploration</title>
 
     <!-- browser setup -->
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,12 +10,12 @@
     <meta content="IE=edge" http-equiv="X-UA-Compatible">
 
     <!-- page meta information -->
-    <meta name="description" content="Exporting DB">
+    <meta name="description" content="The doucments within this section contain algorithms, and generally exploratory content that seeks to try to analyze data in some fashion.">
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="gtoolkit book">
-    <meta property="og:title" content="Exporting DB">
-    <meta property="og:url" content="https://book.gtoolkit.com/exporting-db-2qzwdpylyjqzjz481air380zg.html">
-    <meta property="og:description" content="Exporting DB">
+    <meta property="og:title" content="Mahjong Algorithms and Exploration">
+    <meta property="og:url" content="https://book.gtoolkit.com/mahjong-algorithms-and-exploration-3ifqqrjnuly2xjmfreghzqayr.html">
+    <meta property="og:description" content="The doucments within this section contain algorithms, and generally exploratory content that seeks to try to analyze data in some fashion.">
 
     <!-- CSS styles -->
     <link rel="stylesheet" href="assets/vendor/awesomefonts/css/all.css">
@@ -47,7 +47,7 @@
 
                         <!-- navigation start -->
 
-                        <ul class="nav flex-column le-nav le-nav-level-0">  <li class="nav-item  le-nav-item le-nav-level-1">    <a class="nav-link le-nav-link le-nav-level-1" href="table-of-contents-2qzwdq1sjk7rkkm19wn9xo3xm.html">Table of Contents    </a>    <ul class="nav flex-column le-nav le-nav-level-1">      <li class="nav-item  le-nav-item le-nav-level-2">        <a class="nav-link le-nav-link le-nav-level-2" href="mahjong-ajc74mr0i1pgt8td5660dkhg5.html">Mahjong        </a>        <ul class="nav flex-column le-nav le-nav-level-2">          <li class="nav-item  le-nav-item le-nav-level-3">            <a class="nav-link le-nav-link le-nav-level-3" href="mahjong-tactics-1l41j2ln59fumi6gfkewcjimu.html">Mahjong Tactics            </a>          </li>          <li class="nav-item  le-nav-item le-nav-level-3">            <a class="nav-link le-nav-link le-nav-level-3" href="mahjong-algorithms-and-exploration-3ifqqrjnuly2xjmfreghzqayr.html">Mahjong Algorithms and Exploration            </a>            <ul class="nav flex-column le-nav le-nav-level-3">              <li class="nav-item  le-nav-item le-nav-level-4">                <a class="nav-link le-nav-link le-nav-level-4" href="mahjong-hand-acceptance-92qynfei1oie76eyij1ngzavh.html">Mahjong Hand Acceptance                </a>              </li>            </ul>          </li>        </ul>      </li>    </ul>  </li></ul>
+                        <ul class="nav flex-column le-nav le-nav-level-0">  <li class="nav-item  le-nav-item le-nav-level-1">    <a class="nav-link le-nav-link le-nav-level-1" href="table-of-contents-2qzwdq1sjk7rkkm19wn9xo3xm.html">Table of Contents    </a>    <ul class="nav flex-column le-nav le-nav-level-1">      <li class="nav-item  le-nav-item le-nav-level-2">        <a class="nav-link le-nav-link le-nav-level-2" href="mahjong-ajc74mr0i1pgt8td5660dkhg5.html">Mahjong        </a>        <ul class="nav flex-column le-nav le-nav-level-2">          <li class="nav-item  le-nav-item le-nav-level-3">            <a class="nav-link le-nav-link le-nav-level-3" href="mahjong-tactics-1l41j2ln59fumi6gfkewcjimu.html">Mahjong Tactics            </a>          </li>          <li class="nav-item  active le-nav-item le-nav-level-3">            <a class="nav-link le-nav-link le-nav-level-3 active" href="mahjong-algorithms-and-exploration-3ifqqrjnuly2xjmfreghzqayr.html">Mahjong Algorithms and Exploration            </a>            <ul class="nav flex-column le-nav le-nav-level-3">              <li class="nav-item  le-nav-item le-nav-level-4">                <a class="nav-link le-nav-link le-nav-level-4" href="mahjong-hand-acceptance-92qynfei1oie76eyij1ngzavh.html">Mahjong Hand Acceptance                </a>              </li>            </ul>          </li>        </ul>      </li>    </ul>  </li></ul>
 
                         <!-- navigation end -->
                     </nav>
@@ -59,11 +59,11 @@
             <div class="col-lg-9 le-main-col">
                 <div class="container min-height py-5 le-main-container">
                     <main>
-                        <h1 class="le-main-title">Exporting DB</h1>
+                        <h1 class="le-main-title">Mahjong Algorithms and Exploration</h1>
 
                         <!-- page content start -->
 
-                        <div class="snippet textual-snippet code-snippet pharo-snippet fullWidth">  <pre class="no_bottom_margin">page := thisSnippet page.sequencer := LeExportUUIDSequencer new.pageLinks := LeExportPageLinksBuilder new		database: page database;		html;		sequencer: sequencer;		build;		links.ourPageLink := pageLinks		linkForPage: page		ifFound: #yourself		ifNone: [ self error: 'This should not happen' ].aContext := LeHtmlContext new		page: page;		pageLinks: pageLinks;		date: (Date today printFormat: #(1 2 3 $/ 1 1));		sequencer: sequencer.LeHtmlAssetsUtility addGtBookAssetsInto: aContext resources.	anExporter := LeHtmlBookExporter new		database: page database;		sequencer: sequencer;		mainPage: 'Notes TOC';		piece: LeHtmlGtBookPiece gtBook;		resources: aContext resources.		anExporter export.anExporter saveToRootDirectory: FileLocator imageDirectory / 'foo'."htmlString := a contents.aContext resources.aContext assembler assemble.LeExportResourcesDirectorySaver new	resources: aContext resources;	rootDirectory: FileLocator imageDirectory / 'foo';	save.FileLocator imageDirectory / 'foo'.FileLocator imageDirectory / 'foo'	/ ((page title asString copyReplaceAll: ' ' with: '_') , '.html')	writeStreamDo: [ :aStream | aStream nextPutAll: htmlString ]"  </pre></div><div class="snippet textual-snippet text-snippet paragraphWidth"></div>
+                        <div class="snippet textual-snippet text-snippet paragraphWidth">  <p>The doucments within this section contain algorithms, and generally exploratory content that seeks to try to analyze data in some fashion.  </p></div><div class="snippet textual-snippet text-snippet paragraphWidth">  <p>Often the analysis is quite simple and not very formal.  </p></div><div class="snippet textual-snippet text-snippet paragraphWidth">  <p>The <a href="mahjong-hand-acceptance-92qynfei1oie76eyij1ngzavh.html">Mahjong Hand Acceptance</a> is a good example, it does not cover any real sophisticated math or even good algorithms, it's just an exploration of     <i>my    </i> understanding of how one could compute tile acceptance  </p></div>
 
                         <!-- page content end -->
                     </main>
